@@ -14,7 +14,7 @@ from datetime import datetime
 from tkinter import ttk
 from typing import Any
 
-from .api import ApiClient, CALL_TYPE_LABELS
+from .api import SupabaseRest, CALL_TYPE_LABELS
 
 log = logging.getLogger("ringkeeper.list")
 
@@ -31,7 +31,7 @@ def _fmt(iso: str) -> str:
 
 
 class ListWindow:
-    def __init__(self, root: tk.Tk, api: ApiClient):
+    def __init__(self, root: tk.Tk, api: SupabaseRest):
         self.root = root
         self.api = api
         self.win: tk.Toplevel | None = None

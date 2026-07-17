@@ -1,5 +1,7 @@
 {
-  "server_url": "http://localhost:3000",
-  "token": "paste-the-same-SHARED_TOKEN-as-the-server",
+  "supabase_url": "https://your-project-ref.supabase.co",
+  "anon_key": "paste-your-anon-public-key",
+  "email": "your-ringkeeper-account@example.com",
+  "password": "your-account-password",
   "popup_for": ["missed"]
 }

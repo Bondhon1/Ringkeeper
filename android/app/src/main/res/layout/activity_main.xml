@@ -76,7 +76,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
-            android:text="2. Configure server URL and token" />
+            android:text="2. Configure Supabase connection" />
 
         <Button
             android:id="@+id/btnBattery"

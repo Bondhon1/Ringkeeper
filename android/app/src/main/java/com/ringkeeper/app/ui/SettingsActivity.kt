@@ -4,11 +4,10 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.ringkeeper.app.data.CallEntity
 import com.ringkeeper.app.data.Settings
 import com.ringkeeper.app.databinding.ActivitySettingsBinding
-import com.ringkeeper.app.net.ApiClient
 import com.ringkeeper.app.net.PostResult
+import com.ringkeeper.app.net.SupabaseClient
 import com.ringkeeper.app.service.CallMonitorService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -26,60 +25,54 @@ class SettingsActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         settings = Settings.get(this)
-        binding.editServerUrl.setText(settings.serverUrl)
-        binding.editToken.setText(settings.token)
+        binding.editUrl.setText(settings.supabaseUrl)
+        binding.editAnonKey.setText(settings.anonKey)
+        binding.editEmail.setText(settings.email)
+        binding.editPassword.setText(settings.password)
 
         binding.btnSave.setOnClickListener { save() }
         binding.btnTest.setOnClickListener { testConnection() }
     }
 
+    private fun readFields(): Boolean {
+        val url = binding.editUrl.text.toString().trim()
+        val anon = binding.editAnonKey.text.toString().trim()
+        val email = binding.editEmail.text.toString().trim()
+        val password = binding.editPassword.text.toString()
+        if (url.isEmpty() || anon.isEmpty() || email.isEmpty() || password.isEmpty()) {
+            Toast.makeText(this, "All fields are required", Toast.LENGTH_SHORT).show()
+            return false
+        }
+        if (!url.startsWith("https://") && !url.startsWith("http://")) {
+            Toast.makeText(this, "URL must start with https://", Toast.LENGTH_LONG).show()
+            return false
+        }
+        // Persist first so the auth manager and client read fresh values.
+        settings.supabaseUrl = url
+        settings.anonKey = anon
+        settings.email = email
+        settings.password = password
+        settings.clearTokens() // creds changed → drop any cached JWT
+        return true
+    }
+
     private fun save() {
-        val url = binding.editServerUrl.text.toString().trim()
-        val token = binding.editToken.text.toString().trim()
-        if (url.isEmpty() || token.isEmpty()) {
-            Toast.makeText(this, "Both fields are required", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            Toast.makeText(this, "URL must start with http:// or https://", Toast.LENGTH_LONG).show()
-            return
-        }
-        settings.serverUrl = url
-        settings.token = token
-        // (Re)start monitoring now that we're configured.
+        if (!readFields()) return
         CallMonitorService.start(this)
         Toast.makeText(this, "Saved. Monitoring started.", Toast.LENGTH_SHORT).show()
         finish()
     }
 
     private fun testConnection() {
-        val url = binding.editServerUrl.text.toString().trim()
-        val token = binding.editToken.text.toString().trim()
-        if (url.isEmpty() || token.isEmpty()) {
-            Toast.makeText(this, "Enter URL and token first", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (!readFields()) return
         binding.btnTest.isEnabled = false
         lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val api = ApiClient(url.trimEnd('/') + "/api/calls", token)
-                // A harmless probe row the server accepts and de-dupes.
-                api.postCall(
-                    CallEntity(
-                        callLogId = -1,
-                        callerName = "RingKeeper test",
-                        number = "test",
-                        callType = "unknown",
-                        callTimeMillis = System.currentTimeMillis(),
-                        clientUid = "connection-test-probe",
-                    ),
-                )
-            }
+            val result = withContext(Dispatchers.IO) { SupabaseClient(this@SettingsActivity).testConnection() }
             binding.btnTest.isEnabled = true
             val msg = when (result) {
-                is PostResult.Accepted -> "Connection OK ✓"
+                is PostResult.Accepted -> "Connection OK ✓ (signed in)"
                 is PostResult.Retry -> "Failed: ${result.reason}"
-                is PostResult.Drop -> "Server rejected request: ${result.reason}"
+                is PostResult.Drop -> "Rejected: ${result.reason}"
             }
             Toast.makeText(this@SettingsActivity, msg, Toast.LENGTH_LONG).show()
         }

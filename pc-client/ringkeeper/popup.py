@@ -16,7 +16,7 @@ import tkinter as tk
 from datetime import datetime, timezone
 from typing import Any
 
-from .api import ApiClient, CALL_TYPE_LABELS
+from .api import SupabaseRest, CALL_TYPE_LABELS
 
 log = logging.getLogger("ringkeeper.popup")
 
@@ -45,7 +45,7 @@ def _format_time(iso: str) -> str:
 
 
 class PopupManager:
-    def __init__(self, root: tk.Tk, api: ApiClient):
+    def __init__(self, root: tk.Tk, api: SupabaseRest):
         self.root = root
         self.api = api
         self._open: list[tk.Toplevel] = []

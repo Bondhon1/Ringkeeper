@@ -1,21 +1,19 @@
-"""Headless integration test for the non-GUI PC-client layers.
+"""Offline wiring test for the Supabase-native PC client.
 
-Verifies config loading, the REST ApiClient, and the auto-reconnecting WsClient
-against a running server. Does NOT open any Tk windows.
+Verifies config loading, URL derivation, and that the auth/REST/realtime layers
+construct and import cleanly — no network, no Tk. A full live test needs a real
+Supabase project (see supabase/SETUP.md); this catches wiring/typo regressions.
 """
 
 import sys
-import threading
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import requests  # noqa: E402
-
-from ringkeeper.api import ApiClient  # noqa: E402
+from ringkeeper.api import SupabaseRest  # noqa: E402
+from ringkeeper.auth import TokenManager  # noqa: E402
 from ringkeeper.config import load_config  # noqa: E402
-from ringkeeper.ws_client import WsClient  # noqa: E402
+from ringkeeper.realtime import SupabaseRealtime  # noqa: E402
 
 failures = 0
 
@@ -28,67 +26,30 @@ def check(name, cond):
 
 
 cfg = load_config()
-check("config loads", bool(cfg.server_url and cfg.token))
-check("ws_url derived from http", cfg.ws_url == "ws://localhost:3000/ws")
-
-api = ApiClient(cfg)
-before = api.list_calls(limit=1000)
-check("api.list_calls works", isinstance(before, list))
-
-# Start the WS client and capture pushes.
-received = []
-connected = threading.Event()
-
-
-def on_msg(msg):
-    received.append(msg)
-
-
-def on_status(is_conn):
-    if is_conn:
-        connected.set()
-
-
-ws = WsClient(cfg, on_message=on_msg, on_status=on_status)
-ws.start()
-check("ws connects within 5s", connected.wait(timeout=5))
-
-# POST a missed call directly to the server and expect a WS push.
-uid = f"pyclient-{int(time.time()*1000)}"
-resp = requests.post(
-    f"{cfg.http_base}/api/calls",
-    headers={"Authorization": f"Bearer {cfg.token}"},
-    json={
-        "caller_name": "PC Client Test",
-        "number": "+15559990000",
-        "call_type": "missed",
-        "timestamp": "2026-07-18T10:00:00Z",
-        "client_uid": uid,
-    },
-    timeout=10,
+check("config loads", bool(cfg.supabase_url and cfg.anon_key and cfg.email))
+check("rest_url derived", cfg.rest_url == f"{cfg.base}/rest/v1")
+check("auth_url derived", cfg.auth_url == f"{cfg.base}/auth/v1")
+check(
+    "realtime_url is wss + /realtime/v1",
+    cfg.realtime_url == "wss://demo-project.supabase.co/realtime/v1",
 )
-check("POST accepted", resp.status_code in (200, 201))
 
-deadline = time.time() + 5
-pushed = None
-while time.time() < deadline:
-    for m in received:
-        if m.get("type") == "new_call" and m.get("data", {}).get("client_uid") == uid:
-            pushed = m
-            break
-    if pushed:
-        break
-    time.sleep(0.1)
-check("WS received the new_call push", pushed is not None)
-check("pushed call is a missed call", pushed and pushed["data"]["call_type"] == "missed")
+tokens = TokenManager(cfg)
+check("TokenManager constructs", tokens is not None)
 
-# mark_seen round-trips.
-if pushed:
-    cid = pushed["data"]["id"]
-    seen = api.mark_seen(cid)
-    check("api.mark_seen sets seen=1", seen.get("seen") == 1)
+api = SupabaseRest(cfg, tokens)
+check("SupabaseRest constructs", api is not None)
 
-ws.stop()
-time.sleep(0.3)
-print("\n" + ("All headless tests passed." if failures == 0 else f"{failures} failure(s)."))
+rt = SupabaseRealtime(cfg, tokens, on_new_call=lambda r: None, on_status=lambda c: None)
+check("SupabaseRealtime constructs", rt is not None)
+
+# The INSERT payload shape from Supabase Realtime: payload["data"]["record"].
+captured = []
+rt2 = SupabaseRealtime(cfg, tokens, on_new_call=captured.append)
+rt2._on_insert({"data": {"record": {"id": 1, "call_type": "missed", "number": "+1"}}})
+check("_on_insert extracts record", len(captured) == 1 and captured[0]["id"] == 1)
+rt2._on_insert({"data": {}})  # missing record → ignored, no crash
+check("_on_insert tolerates missing record", len(captured) == 1)
+
+print("\n" + ("All offline wiring tests passed." if failures == 0 else f"{failures} failure(s)."))
 sys.exit(1 if failures else 0)

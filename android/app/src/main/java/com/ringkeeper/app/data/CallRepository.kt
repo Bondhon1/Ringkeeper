@@ -7,8 +7,8 @@ import android.provider.CallLog
 import android.provider.Settings as AndroidSettings
 import android.util.Log
 import androidx.core.content.ContextCompat
-import com.ringkeeper.app.net.ApiClient
 import com.ringkeeper.app.net.PostResult
+import com.ringkeeper.app.net.SupabaseClient
 
 /**
  * Ties together the CallLog, the local Room DB, and the server.
@@ -102,11 +102,11 @@ class CallRepository(private val context: Context) {
             Log.w(TAG, "syncPending skipped: server not configured")
             return false
         }
-        val api = ApiClient(settings.apiCallsUrl(), settings.token)
+        val api = SupabaseClient(context)
         var allDone = true
         val pending = dao.unsynced(limit = 200)
         for (call in pending) {
-            when (val result = api.postCall(call)) {
+            when (val result = api.insertCall(call)) {
                 is PostResult.Accepted -> dao.markSynced(call.id)
                 is PostResult.Drop -> {
                     // Permanent error — mark synced so it stops blocking the queue.

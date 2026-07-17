@@ -12,14 +12,14 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Server URL"
+            android:text="Supabase project URL"
             android:textStyle="bold" />
 
         <EditText
-            android:id="@+id/editServerUrl"
+            android:id="@+id/editUrl"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="https://your-server.example.com"
+            android:hint="https://your-ref.supabase.co"
             android:importantForAutofill="no"
             android:inputType="textUri" />
 
@@ -27,16 +27,46 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Shared token"
+            android:text="Anon public key"
             android:textStyle="bold" />
 
         <EditText
-            android:id="@+id/editToken"
+            android:id="@+id/editAnonKey"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="same as the server's SHARED_TOKEN"
+            android:hint="eyJ… (Project Settings → API)"
             android:importantForAutofill="no"
             android:inputType="textNoSuggestions" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Account email"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/editEmail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="your-ringkeeper-account@example.com"
+            android:importantForAutofill="no"
+            android:inputType="textEmailAddress" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Account password"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/editPassword"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="the account password"
+            android:importantForAutofill="no"
+            android:inputType="textPassword" />
 
         <Button
             android:id="@+id/btnTest"

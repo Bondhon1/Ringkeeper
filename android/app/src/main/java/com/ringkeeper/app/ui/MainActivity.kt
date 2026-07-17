@@ -89,7 +89,7 @@ class MainActivity : AppCompatActivity() {
         val hasPerms = repo.hasCallLogPermission()
 
         binding.txtConfigured.text =
-            if (settings.isConfigured) "Server: ${settings.serverUrl}" else "Server: not configured"
+            if (settings.isConfigured) "Supabase: ${settings.supabaseUrl}" else "Supabase: not configured"
         binding.txtPermissions.text =
             if (hasPerms) "Call log permission: granted" else "Call log permission: NOT granted"
         binding.txtBattery.text =
