@@ -1,0 +1,5 @@
+{
+  "server_url": "http://localhost:3000",
+  "token": "paste-the-same-SHARED_TOKEN-as-the-server",
+  "popup_for": ["missed"]
+}

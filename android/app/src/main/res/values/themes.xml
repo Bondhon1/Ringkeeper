@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.RingKeeper" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/rk_primary</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+    </style>
+
+    <!-- Settings screen keeps an action bar for the up button. -->
+    <style name="Theme.RingKeeper.Settings" parent="Theme.Material3.DayNight">
+        <item name="colorPrimary">@color/rk_primary</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+    </style>
+</resources>

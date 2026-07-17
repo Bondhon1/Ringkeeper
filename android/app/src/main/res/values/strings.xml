@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RingKeeper</string>
+    <string name="tagline">Relays your calls to your PC.</string>
+
+    <string name="channel_monitor">Call monitoring</string>
+    <string name="channel_monitor_desc">Keeps RingKeeper watching for calls in the background.</string>
+
+    <string name="notif_title">RingKeeper is watching for calls</string>
+    <string name="notif_text">Missed calls are relayed to your PC.</string>
+
+    <string name="settings_title">RingKeeper settings</string>
+</resources>
