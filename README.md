@@ -1,107 +1,62 @@
 # RingKeeper — Missed Call Alert Bridge
 
 Relays calls from an Android phone to a persistent, un-missable popup on a Windows PC,
-plus a running list of every call. Single user, two devices, one shared secret token.
+plus a running list of every call. Single user, two devices — with **Supabase** as the
+entire backend (no server to host, no credit card).
 
 ```
-Android phone  ──HTTPS POST──▶  Server (Node + WebSocket)  ──WS push──▶  Windows PC client
-   │                                    │                                      │
-CallLog observer                   SQLite (all calls,                   Always-on-top popup
-(captures ALL call types,          separated by type)                   for MISSED calls
- stored locally first)                                                  + tray icon + call list
+Android phone ──REST insert──▶  Supabase  ──Realtime (WebSocket)──▶  Windows PC client
+   │                         (Postgres + Realtime + Auth)                    │
+CallLog observer                     │                              Always-on-top popup
+(captures ALL call types,        calls table                        for MISSED calls
+ stored locally first)           (RLS per account)                  + tray icon + call list
 ```
 
 **What it captures vs. what pops up.** The phone records **every** call — missed, incoming
 (answered), outgoing, rejected, blocked, voicemail — into a **local database first** (so
-nothing is lost while offline), then syncs to the server. All types are stored and appear
+nothing is lost while offline), then syncs each to Supabase. All types are stored and appear
 in the PC's list window, grouped by type. Only **missed** calls trigger the always-on-top
-popup, which stays on screen until you dismiss it. (Change which types pop up via
-`popup_for` in the PC client config — no rebuild needed.)
+popup, which stays on screen until you dismiss it. (Change which types pop up via `popup_for`
+in the PC client config — no rebuild needed.)
+
+**Why Supabase (and not Vercel/Render/Fly).** The un-missable alert needs a live push to the
+PC and persistent storage. Supabase gives all three pieces free with no card: Postgres
+(storage), **Realtime** (a managed WebSocket that pushes each new row to the PC instantly),
+and **Auth** (one account shared by your two devices, with Row-Level Security so only you can
+see your calls). There's no long-running server to deploy — the phone and PC talk to Supabase
+directly. Serverless hosts like Vercel can't hold the WebSocket or keep a database, and a
+custom always-on server would need a paid host.
 
 ---
 
 ## Repository layout
 
-| Folder        | What it is                                             | Language            |
-|---------------|--------------------------------------------------------|---------------------|
-| `server/`     | Relay server: HTTP API + WebSocket push + SQLite       | Node.js/TypeScript  |
-| `pc-client/`  | Popup + call list + tray icon                          | Python 3.11+        |
-| `android/`    | Call capture, local DB, network-aware sync             | Kotlin (Android)    |
+| Folder        | What it is                                            | Language           |
+|---------------|-------------------------------------------------------|--------------------|
+| `supabase/`   | `schema.sql` (table + RLS + realtime) and setup guide | SQL                |
+| `pc-client/`  | Popup + call list + tray icon                         | Python 3.11+       |
+| `android/`    | Call capture, local DB, network-aware sync            | Kotlin (Android)   |
 
 ---
 
-## 0. Generate the shared token (do this first)
+## 1. Set up Supabase (do this first)
 
-Both the phone and the PC authenticate with one long random token. Generate one:
+Follow **[supabase/SETUP.md](supabase/SETUP.md)**. In short:
 
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
+1. Create a free Supabase project (GitHub login, no card).
+2. Copy your **Project URL** and **anon public key** (Project Settings → API).
+3. Run **[supabase/schema.sql](supabase/schema.sql)** in the SQL Editor (creates the `calls`
+   table, Row-Level Security, and enables Realtime).
+4. Create one account (Authentication → Users → Add user, **Auto Confirm** on).
 
-You'll paste this **same** value into all three components below.
-
----
-
-## 1. Server (`server/`)
-
-**Requirements:** Node.js **22.5+** (uses the built-in `node:sqlite` — no native build tools,
-no `better-sqlite3` compile step).
-
-```bash
-cd server
-npm install
-cp .env.example .env          # then edit .env
-```
-
-Set in `.env`:
-
-```
-PORT=3000
-SHARED_TOKEN=<the token you generated above>
-DB_PATH=./data/ringkeeper.db
-```
-
-Run it:
-
-```bash
-npm run dev      # watch mode (tsx)
-# or
-npm run build && npm start
-```
-
-**Endpoints** (all under `/api` require `Authorization: Bearer <SHARED_TOKEN>`):
-
-| Method | Path                    | Purpose                                                        |
-|--------|-------------------------|----------------------------------------------------------------|
-| POST   | `/api/calls`            | Phone submits a call `{caller_name, number, call_type, timestamp, client_uid}` |
-| GET    | `/api/calls`            | List calls; filters: `?since=<iso>&type=<type>&limit=<n>`      |
-| PATCH  | `/api/calls/:id/seen`   | Mark a call acknowledged                                       |
-| WS     | `/ws?token=<token>`     | PC client connects; server pushes `{type:"new_call", data}`   |
-| GET    | `/health`               | Unauthenticated health check                                  |
-
-`call_type` is one of: `missed`, `incoming`, `outgoing`, `rejected`, `blocked`,
-`voicemail`, `unknown`. `client_uid` makes retries idempotent — re-POSTing the same
-uid returns the existing row and does not double-push.
-
-**Smoke test** (server must be running):
-
-```bash
-SHARED_TOKEN=<token> BASE=http://localhost:3000 npm run test:smoke
-```
-
-**Deploy (free, always-on):** see **[server/DEPLOY.md](server/DEPLOY.md)** for step-by-step
-Fly.io instructions — it runs the server 24/7 with WebSocket support and keeps the SQLite
-file on a persistent volume (no external DB, no cold starts). The repo includes a `Dockerfile`
-and `fly.toml` ready to go. Note: Vercel/Netlify/Cloudflare Workers **won't** work here —
-they're serverless and can't hold the long-lived WebSocket or keep the SQLite file on disk.
-Once deployed, point both clients at the `https://…fly.dev` URL (the WebSocket upgrades to
-`wss://` automatically).
+You'll end up with four values used by **both** clients: `supabase_url`, `anon_key`,
+`email`, `password`.
 
 ---
 
 ## 2. Windows PC client (`pc-client/`)
 
-**Requirements:** Python **3.11+** (Tkinter ships with the standard python.org installer).
+**Requirements:** Python **3.11+** (Tkinter ships with the python.org installer).
 
 ```bash
 cd pc-client
@@ -114,8 +69,10 @@ copy config.example.json config.json     # then edit config.json
 
 ```json
 {
-  "server_url": "http://localhost:3000",
-  "token": "<the same SHARED_TOKEN>",
+  "supabase_url": "https://your-ref.supabase.co",
+  "anon_key": "eyJhbGci…",
+  "email": "your-ringkeeper-account@example.com",
+  "password": "your-account-password",
   "popup_for": ["missed"]
 }
 ```
@@ -126,20 +83,19 @@ Run it:
 .venv\Scripts\pythonw.exe main.py      # pythonw = no console window
 ```
 
-You get a tray icon (green = connected). Right-click → **Show calls** for the full list.
-Missed calls appear as always-on-top popups in the bottom-right that only close when you
-click **Dismiss** (which also marks them seen on the server).
+The client signs in to Supabase, subscribes to Realtime, and shows a tray icon (green =
+connected). Right-click → **Show calls** for the full list. Missed calls appear as
+always-on-top popups in the bottom-right that only close when you click **Dismiss** (which
+also marks them seen in Supabase).
 
-**Headless self-test** (server must be running, `config.json` present):
-
+**Offline wiring self-test** (no network needed, `config.json` present):
 ```bash
 .venv\Scripts\python.exe scripts\headless_test.py
 ```
 
 **Auto-start at login** — run with the **same interpreter** that has the packages installed
-(the venv), which the installer enforces by deriving `pythonw.exe` from the current
-interpreter rather than PATH:
-
+(the venv); the installer derives `pythonw.exe` from the current interpreter to avoid the
+classic pyw/python environment mismatch:
 ```bash
 .venv\Scripts\python.exe install_autostart.py install     # register Task Scheduler entry
 .venv\Scripts\python.exe install_autostart.py status
@@ -150,17 +106,17 @@ interpreter rather than PATH:
 
 ## 3. Android app (`android/`)
 
-**Requirements:** Android Studio (or the Android SDK + JDK 17). `minSdk 26`, `compileSdk 35`.
+**Requirements:** Android Studio (or Android SDK + JDK 17). `minSdk 26`, `compileSdk 35`.
 
-1. Open the `android/` folder in Android Studio. It creates `local.properties` with your
-   SDK path automatically. (To build from the CLI, add `android/local.properties` with
-   `sdk.dir=C:/Path/To/Android/Sdk` — **use forward slashes**.)
-2. Build/run: `./gradlew assembleDebug` (or Run ▶ from the IDE). The debug APK lands in
+1. Open the `android/` folder in Android Studio (it writes `local.properties` with your SDK
+   path automatically; for CLI builds add `android/local.properties` with
+   `sdk.dir=C:/Path/To/Android/Sdk` — **use forward slashes**).
+2. Build/run: `./gradlew assembleDebug` (or Run ▶). APK →
    `android/app/build/outputs/apk/debug/app-debug.apk`.
 3. On the phone, open **RingKeeper** and:
    - **Grant call log permission** (READ_CALL_LOG / READ_PHONE_STATE / notifications).
-   - **Configure server URL + token** — the same token; the URL must be reachable from the
-     phone (a public HTTPS URL when off Wi-Fi). Tap **Test connection**.
+   - **Configure Supabase connection** — paste the same `supabase_url`, `anon_key`, `email`,
+     `password`. Tap **Test connection** (it signs in and checks access).
    - **Disable battery optimization** — important on Xiaomi/Samsung/Oppo, which aggressively
      kill background services.
    - Tap **Start monitoring**.
@@ -168,51 +124,57 @@ interpreter rather than PATH:
 **How it works:** a foreground service ("RingKeeper is watching for calls") registers a
 `ContentObserver` on the system call log. Every new call of any type is written to a local
 **Room** database immediately, then a **WorkManager** job — constrained to run only when a
-network is available, with exponential backoff — pushes unsynced rows to the server. If the
-phone is offline, calls pile up locally and flush automatically when connectivity returns
-(a network callback also nudges the queue on reconnect). A boot receiver restarts monitoring
-after a reboot.
+network is available, with exponential backoff — signs in to Supabase (JWT cached, refreshed
+automatically) and inserts unsynced rows via PostgREST, upserting on `client_uid` so retries
+never duplicate. If the phone is offline, calls pile up locally and flush automatically when
+connectivity returns (a network callback also nudges the queue). A boot receiver restarts
+monitoring after a reboot.
 
 ---
 
 ## End-to-end sanity check
 
-1. Start the **server** (`npm run dev`).
-2. Start the **PC client** — tray icon turns green.
-3. On the **phone** (configured + monitoring), have someone call you and don't answer.
-4. The missed call POSTs to the server → pushes over WebSocket → an always-on-top popup
-   appears on the PC. Answered/outgoing calls won't pop up but show in **Show calls**.
+1. Start the **PC client** — tray icon turns green once it's subscribed.
+2. On the **phone** (configured + monitoring), have someone call you and don't answer.
+3. The missed call is stored locally, synced to Supabase, and Supabase Realtime pushes it to
+   the PC → an always-on-top popup appears. Answered/outgoing calls won't pop up but show in
+   **Show calls**.
 
-Quick manual test without a phone — POST directly and watch the popup:
+Quick manual test without a phone — insert a row straight into Supabase and watch the popup
+(replace URL / anon key / a valid access token, or just use the SQL Editor):
 
-```bash
-curl -X POST http://localhost:3000/api/calls \
-  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
-  -d '{"caller_name":"Test","number":"+15551234567","call_type":"missed","timestamp":"2026-07-18T10:00:00Z"}'
+```sql
+insert into public.calls (user_id, number, caller_name, call_type, call_time)
+values (auth.uid(), '+15551234567', 'Test', 'missed', now());
 ```
+(Run it while signed in via the dashboard SQL editor as your user, or use the REST API with
+your account's JWT.)
 
 ---
 
 ## Data model
 
-```sql
-CREATE TABLE calls (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  caller_name  TEXT,
-  number       TEXT NOT NULL,
-  call_type    TEXT NOT NULL DEFAULT 'unknown',  -- missed | incoming | outgoing | rejected | blocked | voicemail | unknown
-  call_time    TEXT NOT NULL,                    -- ISO 8601, when the call happened
-  received_at  TEXT NOT NULL,                    -- ISO 8601, when the server stored it
-  seen         INTEGER NOT NULL DEFAULT 0,
-  client_uid   TEXT                              -- phone-side dedupe key (idempotent retries)
-);
-```
+See **[supabase/schema.sql](supabase/schema.sql)** for the full definition. The `calls` table:
+
+| column        | type          | notes                                             |
+|---------------|---------------|---------------------------------------------------|
+| `id`          | bigint (PK)   | identity                                          |
+| `user_id`     | uuid          | `default auth.uid()`, FK → auth.users, RLS key    |
+| `caller_name` | text          | nullable                                          |
+| `number`      | text          | not null                                          |
+| `call_type`   | text          | missed / incoming / outgoing / rejected / blocked / voicemail / unknown |
+| `call_time`   | timestamptz   | when the call happened                            |
+| `received_at` | timestamptz   | `default now()`                                   |
+| `seen`        | boolean       | `default false`                                   |
+| `client_uid`  | text (unique) | phone-side dedupe key (idempotent inserts)        |
 
 ## Security notes
 
-- One shared secret for everything. Keep it out of source control (`server/.env`,
-  `pc-client/config.json`, and the phone's EncryptedSharedPreferences are all gitignored /
-  on-device). Rotate it by updating the value in all three places.
-- Put the server behind **HTTPS** in production so the token and call data aren't sent in
-  the clear (Railway/Render/Fly give you TLS automatically).
-```
+- **Row-Level Security** scopes every row to your account (`user_id = auth.uid()`), and
+  Realtime respects it — only your own calls are ever pushed to the PC.
+- The **anon key** is meant to live in client apps; it's not the sensitive part. Your account
+  password is — it's stored in the phone's EncryptedSharedPreferences and the PC's local
+  `config.json` (gitignored). Optionally disable new sign-ups in Supabase after creating your
+  account so no one else can register.
+- Rotate access by changing the account password in the Supabase dashboard, then updating it
+  in the PC config and the phone settings.
