@@ -54,12 +54,24 @@ class CallMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-        } else {
-            0
+        // specialUse on API 34+ (no runtime time limit); dataSync back to API 29.
+        val type = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            else -> 0
         }
-        ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(), type)
+        try {
+            ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(), type)
+        } catch (e: Exception) {
+            // e.g. ForegroundServiceStartNotAllowedException if the OS refuses the
+            // start. Never let that crash the app — bail out and let the boot
+            // receiver / next call trigger bring monitoring back.
+            Log.w(TAG, "startForeground refused: ${e.message}")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         SyncScheduler.ensurePeriodic(applicationContext)
         // Catch up on anything that happened while we weren't watching.
         scope.launch {
