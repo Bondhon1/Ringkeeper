@@ -26,6 +26,14 @@ class Config:
     email: str
     password: str
     popup_for: list[str] = field(default_factory=lambda: ["missed"])
+    # Only calls that occurred within this many seconds of "now" trigger a
+    # popup + sound. Older rows (e.g. the one-time history backfill the phone
+    # does on first run) go to the list silently instead of flooding the screen.
+    popup_max_age_seconds: int = 600
+    # Play a notification chime when a fresh call pops up.
+    sound: bool = True
+    # Optional path to a custom .wav; falls back to a Windows system sound.
+    sound_file: str | None = None
 
     @property
     def base(self) -> str:
@@ -66,6 +74,9 @@ def load_config() -> Config:
     email = os.environ.get("RINGKEEPER_EMAIL") or data.get("email", "")
     password = os.environ.get("RINGKEEPER_PASSWORD") or data.get("password", "")
     popup_for = data.get("popup_for") or ["missed"]
+    popup_max_age_seconds = int(data.get("popup_max_age_seconds", 600))
+    sound = bool(data.get("sound", True))
+    sound_file = data.get("sound_file") or None
 
     missing = [
         name
@@ -90,4 +101,7 @@ def load_config() -> Config:
         email=email,
         password=password,
         popup_for=list(popup_for),
+        popup_max_age_seconds=popup_max_age_seconds,
+        sound=sound,
+        sound_file=sound_file,
     )

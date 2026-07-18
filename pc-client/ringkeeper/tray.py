@@ -31,24 +31,33 @@ class Tray:
         self,
         on_show_list: Callable[[], None],
         on_quit: Callable[[], None],
+        on_test: Callable[[], None] | None = None,
     ):
         self.on_show_list = on_show_list
         self.on_quit = on_quit
+        self.on_test = on_test or (lambda: None)
         self._connected = False
         self.icon = pystray.Icon(
             "ringkeeper",
             icon=_make_icon_image(False),
             title="RingKeeper — connecting…",
-            menu=pystray.Menu(
-                pystray.MenuItem("Show calls", self._show_list, default=True),
-                pystray.MenuItem("Status: connecting…", None, enabled=False),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Quit", self._quit),
-            ),
+            menu=self._build_menu("Status: connecting…"),
+        )
+
+    def _build_menu(self, status: str) -> "pystray.Menu":
+        return pystray.Menu(
+            pystray.MenuItem("Show calls", self._show_list, default=True),
+            pystray.MenuItem("Send test popup", self._test),
+            pystray.MenuItem(status, None, enabled=False),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Quit", self._quit),
         )
 
     def _show_list(self, _icon=None, _item=None) -> None:
         self.on_show_list()
+
+    def _test(self, _icon=None, _item=None) -> None:
+        self.on_test()
 
     def _quit(self, _icon=None, _item=None) -> None:
         try:
@@ -63,12 +72,7 @@ class Tray:
             self.icon.title = "RingKeeper — connected" if connected else "RingKeeper — offline"
             # Rebuild the menu so the status line reflects the new state.
             status = "Status: connected" if connected else "Status: offline"
-            self.icon.menu = pystray.Menu(
-                pystray.MenuItem("Show calls", self._show_list, default=True),
-                pystray.MenuItem(status, None, enabled=False),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Quit", self._quit),
-            )
+            self.icon.menu = self._build_menu(status)
             self.icon.update_menu()
         except Exception as exc:  # noqa: BLE001
             log.debug("tray update failed: %s", exc)

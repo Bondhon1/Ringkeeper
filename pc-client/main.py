@@ -15,6 +15,7 @@ import logging
 import sys
 import threading
 import tkinter as tk
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +25,11 @@ from ringkeeper.config import load_config
 from ringkeeper.list_window import ListWindow
 from ringkeeper.popup import PopupManager
 from ringkeeper.realtime import SupabaseRealtime
+from ringkeeper.sound import play_notification
 from ringkeeper.tray import Tray
 
 LOG_PATH = Path(__file__).resolve().parent / "ringkeeper-client.log"
+log = logging.getLogger("ringkeeper")
 
 
 def setup_logging() -> None:
@@ -67,7 +70,9 @@ class App:
 
         self.popups = PopupManager(self.root, self.api)
         self.list_window = ListWindow(self.root, self.api)
-        self.tray = Tray(on_show_list=self._show_list, on_quit=self._quit)
+        self.tray = Tray(
+            on_show_list=self._show_list, on_quit=self._quit, on_test=self._test_popup,
+        )
         self.realtime = SupabaseRealtime(
             self.config,
             self.tokens,
@@ -105,6 +110,16 @@ class App:
     def _show_list(self) -> None:
         self.root.after(0, self.list_window.open)
 
+    def _test_popup(self) -> None:
+        sample = {
+            "id": -1,
+            "caller_name": "Test Caller",
+            "number": "+1 555 0100",
+            "call_type": next(iter(self._popup_types), "missed"),
+            "call_time": datetime.now(timezone.utc).isoformat(),
+        }
+        self.root.after(0, lambda: self._handle_new_call(sample))
+
     # --- realtime callbacks (realtime thread) ----------------------------
     def _on_new_call(self, record: dict[str, Any]) -> None:
         self.root.after(0, lambda: self._handle_new_call(record))
@@ -114,10 +129,31 @@ class App:
 
     # --- runs on Tk thread ----------------------------------------------
     def _handle_new_call(self, record: dict[str, Any]) -> None:
-        if record.get("call_type") in self._popup_types:
-            self.popups.show(record)
+        # Keep an open list window current for every call (any type).
         if self.list_window.win is not None and self.list_window.win.winfo_exists():
             self.list_window.refresh()
+        # Only pop up + chime for wanted types that are actually recent. This
+        # skips the phone's one-time history backfill (old call_time), which
+        # would otherwise flood the screen with popups on first run.
+        if record.get("call_type") not in self._popup_types:
+            return
+        if not self._is_fresh(record):
+            log.debug("Skipping popup for old call id=%s", record.get("id"))
+            return
+        self.popups.show(record)
+        if self.config.sound:
+            play_notification(self.config.sound_file)
+
+    def _is_fresh(self, record: dict[str, Any]) -> bool:
+        iso = record.get("call_time")
+        if not iso:
+            return True
+        try:
+            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            return True  # unparseable → fail open (better to show than miss one)
+        age = (datetime.now(timezone.utc) - dt).total_seconds()
+        return age <= self.config.popup_max_age_seconds
 
 
 def main() -> None:

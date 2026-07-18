@@ -1,10 +1,11 @@
-"""Always-on-top missed-call popups.
+"""Always-on-top call popups.
 
-Each popup is a borderless Tk Toplevel pinned to the bottom-right corner. They
-stack upward when several arrive and — per the spec — never auto-dismiss. Closing
-one marks the call as seen on the server and reflows the remaining popups.
+Each popup is a borderless card pinned to the bottom-right corner. They stack
+upward, newest nearest the taskbar, and — per the spec — never auto-dismiss.
+A soft cap keeps a burst from covering the whole screen: only the newest
+MAX_VISIBLE are kept on screen (older ones drop off but remain in the list).
 
-All methods must be called on the Tk (main) thread. The WS thread marshals here
+All methods must run on the Tk (main) thread; the Realtime thread marshals here
 via root.after(0, ...).
 """
 
@@ -13,35 +14,20 @@ from __future__ import annotations
 import logging
 import threading
 import tkinter as tk
-from datetime import datetime, timezone
 from typing import Any
 
+from . import theme
 from .api import SupabaseRest, CALL_TYPE_LABELS
 
 log = logging.getLogger("ringkeeper.popup")
 
-POPUP_W = 340
-POPUP_H = 128
-GAP = 12
-SCREEN_MARGIN = 16
-# Rough allowance so the lowest popup sits above the Windows taskbar.
-TASKBAR_ALLOWANCE = 48
-
-BG = "#1f2430"
-ACCENT = "#e5484d"  # red — missed call
-FG = "#f5f7fa"
-SUBTLE = "#9aa4b2"
-
-
-def _format_time(iso: str) -> str:
-    try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
-    except ValueError:
-        return iso
-    now = datetime.now(timezone.utc).astimezone()
-    if dt.date() == now.date():
-        return dt.strftime("%H:%M")
-    return dt.strftime("%b %d, %H:%M")
+POPUP_W = 360
+POPUP_H = 116
+GAP = 10
+SCREEN_MARGIN = 18
+TASKBAR_ALLOWANCE = 52
+MAX_VISIBLE = 5
+AVATAR = 46
 
 
 class PopupManager:
@@ -51,52 +37,96 @@ class PopupManager:
         self._open: list[tk.Toplevel] = []
 
     def show(self, call: dict[str, Any]) -> None:
+        call_type = call.get("call_type", "missed")
+        accent = theme.type_color(call_type)
+        type_label = CALL_TYPE_LABELS.get(call_type, "Call")
+        name = call.get("caller_name") or call.get("number") or "Unknown"
+        number = call.get("number", "")
+
         win = tk.Toplevel(self.root)
         win.overrideredirect(True)
         win.attributes("-topmost", True)
-        win.configure(bg=ACCENT)  # thin accent border via padding
+        win.configure(bg=theme.BG_BORDER)
         win.resizable(False, False)
 
-        # Inner frame gives us a 2px accent edge around the dark body.
-        body = tk.Frame(win, bg=BG)
-        body.pack(fill="both", expand=True, padx=2, pady=2)
+        body = tk.Frame(win, bg=theme.BG_CARD)
+        body.pack(fill="both", expand=True, padx=1, pady=1)
 
-        type_label = CALL_TYPE_LABELS.get(call.get("call_type", "missed"), "Call")
-        header = tk.Frame(body, bg=BG)
-        header.pack(fill="x", padx=14, pady=(12, 2))
+        # Colored accent strip down the left edge.
+        tk.Frame(body, bg=accent, width=4).pack(side="left", fill="y")
+
+        content = tk.Frame(body, bg=theme.BG_CARD)
+        content.pack(side="left", fill="both", expand=True, padx=(12, 12), pady=10)
+
+        # Header: "● Missed call" + time + close.
+        header = tk.Frame(content, bg=theme.BG_CARD)
+        header.pack(fill="x")
         tk.Label(
-            header, text=f"● {type_label} call", bg=BG, fg=ACCENT,
-            font=("Segoe UI Semibold", 10),
+            header, text=f"● {type_label} call", bg=theme.BG_CARD, fg=accent,
+            font=(theme.FONT_SEMI, 9),
         ).pack(side="left")
+        close = tk.Label(
+            header, text="✕", bg=theme.BG_CARD, fg=theme.FG_DIM,
+            font=(theme.FONT, 10), cursor="hand2",
+        )
+        close.pack(side="right")
+        close.bind("<Button-1>", lambda _e: self._close(win, call))
+        close.bind("<Enter>", lambda _e: close.configure(fg=theme.FG))
+        close.bind("<Leave>", lambda _e: close.configure(fg=theme.FG_DIM))
         tk.Label(
-            header, text=_format_time(call.get("call_time", "")), bg=BG, fg=SUBTLE,
-            font=("Segoe UI", 9),
-        ).pack(side="right")
+            header, text=theme.relative_time(call.get("call_time", "")),
+            bg=theme.BG_CARD, fg=theme.FG_SUBTLE, font=(theme.FONT, 9),
+        ).pack(side="right", padx=(0, 10))
 
-        name = call.get("caller_name") or call.get("number") or "Unknown"
+        # Row: avatar + name/number.
+        row = tk.Frame(content, bg=theme.BG_CARD)
+        row.pack(fill="x", pady=(8, 0))
+
+        av = tk.Canvas(
+            row, width=AVATAR, height=AVATAR, bg=theme.BG_CARD,
+            highlightthickness=0,
+        )
+        av.pack(side="left")
+        av.create_oval(2, 2, AVATAR - 2, AVATAR - 2, fill=accent, outline="")
+        av.create_text(
+            AVATAR / 2, AVATAR / 2, text=theme.initial_of(name),
+            fill="#ffffff", font=(theme.FONT_SEMI, 16),
+        )
+
+        text = tk.Frame(row, bg=theme.BG_CARD)
+        text.pack(side="left", fill="x", expand=True, padx=(12, 0))
         tk.Label(
-            body, text=name, bg=BG, fg=FG, font=("Segoe UI Semibold", 14),
-            anchor="w", justify="left",
-        ).pack(fill="x", padx=14)
-
-        number = call.get("number", "")
+            text, text=name, bg=theme.BG_CARD, fg=theme.FG,
+            font=(theme.FONT_SEMI, 13), anchor="w", justify="left",
+        ).pack(fill="x")
         if number and number != name:
             tk.Label(
-                body, text=number, bg=BG, fg=SUBTLE, font=("Segoe UI", 10), anchor="w",
-            ).pack(fill="x", padx=14, pady=(0, 8))
-        else:
-            tk.Frame(body, bg=BG, height=8).pack()
+                text, text=number, bg=theme.BG_CARD, fg=theme.FG_SUBTLE,
+                font=(theme.FONT, 10), anchor="w",
+            ).pack(fill="x")
 
         dismiss = tk.Button(
-            body, text="Dismiss", relief="flat", bg="#2b3242", fg=FG,
-            activebackground="#3a4256", activeforeground=FG, bd=0,
-            font=("Segoe UI", 9), cursor="hand2",
+            row, text="Dismiss", relief="flat", bg=theme.BG_ELEV, fg=theme.FG,
+            activebackground=theme.BG_HOVER, activeforeground=theme.FG, bd=0,
+            font=(theme.FONT, 9), cursor="hand2", padx=14, pady=6,
             command=lambda: self._close(win, call),
         )
-        dismiss.place(relx=1.0, rely=1.0, x=-12, y=-10, anchor="se")
+        dismiss.pack(side="right", anchor="s")
+        dismiss.bind("<Enter>", lambda _e: dismiss.configure(bg=theme.BG_HOVER))
+        dismiss.bind("<Leave>", lambda _e: dismiss.configure(bg=theme.BG_ELEV))
 
         self._open.append(win)
+        self._enforce_cap()
         self._reflow()
+
+    def _enforce_cap(self) -> None:
+        """Keep only the newest MAX_VISIBLE popups on screen."""
+        while len(self._open) > MAX_VISIBLE:
+            oldest = self._open.pop(0)
+            try:
+                oldest.destroy()
+            except tk.TclError:
+                pass
 
     def _close(self, win: tk.Toplevel, call: dict[str, Any]) -> None:
         if win in self._open:
@@ -106,7 +136,6 @@ class PopupManager:
         except tk.TclError:
             pass
         self._reflow()
-        # Acknowledge on the server off the GUI thread.
         call_id = call.get("id")
         if isinstance(call_id, int):
             threading.Thread(
