@@ -12,7 +12,9 @@ interface CallDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnore(call: CallEntity): Long
 
-    @Query("SELECT * FROM calls WHERE synced = 0 ORDER BY callTimeMillis ASC LIMIT :limit")
+    // Newest-first: a fresh call jumps ahead of a large history backfill so its
+    // popup on the PC is near-instant instead of stuck behind thousands of old rows.
+    @Query("SELECT * FROM calls WHERE synced = 0 ORDER BY callTimeMillis DESC LIMIT :limit")
     suspend fun unsynced(limit: Int = 100): List<CallEntity>
 
     @Query("UPDATE calls SET synced = 1 WHERE id = :id")
