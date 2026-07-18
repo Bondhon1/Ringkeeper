@@ -19,8 +19,12 @@ create table if not exists public.calls (
 );
 
 -- Idempotent inserts from the phone: re-POSTing the same client_uid is ignored.
+-- Must be a NON-partial unique index: PostgREST's `on_conflict=client_uid` upsert
+-- can only infer a plain unique index/constraint, not a partial one (a partial
+-- index triggers Postgres error 42P10). NULL client_uids are still allowed
+-- multiple times because Postgres treats NULLs as distinct in a unique index.
 create unique index if not exists calls_client_uid_key
-  on public.calls (client_uid) where client_uid is not null;
+  on public.calls (client_uid);
 
 create index if not exists calls_user_time_idx on public.calls (user_id, call_time desc);
 create index if not exists calls_type_idx on public.calls (call_type);

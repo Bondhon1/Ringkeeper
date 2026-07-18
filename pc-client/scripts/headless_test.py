@@ -29,9 +29,12 @@ cfg = load_config()
 check("config loads", bool(cfg.supabase_url and cfg.anon_key and cfg.email))
 check("rest_url derived", cfg.rest_url == f"{cfg.base}/rest/v1")
 check("auth_url derived", cfg.auth_url == f"{cfg.base}/auth/v1")
+expected_realtime = (
+    cfg.base.replace("https://", "wss://").replace("http://", "ws://") + "/realtime/v1"
+)
 check(
     "realtime_url is wss + /realtime/v1",
-    cfg.realtime_url == "wss://demo-project.supabase.co/realtime/v1",
+    cfg.realtime_url == expected_realtime,
 )
 
 tokens = TokenManager(cfg)
