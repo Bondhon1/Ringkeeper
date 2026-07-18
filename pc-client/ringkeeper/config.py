@@ -29,7 +29,7 @@ class Config:
     # Only calls that occurred within this many seconds of "now" trigger a
     # popup + sound. Older rows (e.g. the one-time history backfill the phone
     # does on first run) go to the list silently instead of flooding the screen.
-    popup_max_age_seconds: int = 600
+    popup_max_age_seconds: int = 3600
     # Play a notification chime when a fresh call pops up.
     sound: bool = True
     # Optional path to a custom .wav; falls back to a Windows system sound.

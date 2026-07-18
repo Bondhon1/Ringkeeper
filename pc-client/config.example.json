@@ -4,7 +4,7 @@
   "email": "your-ringkeeper-account@example.com",
   "password": "your-account-password",
   "popup_for": ["missed"],
-  "popup_max_age_seconds": 600,
+  "popup_max_age_seconds": 3600,
   "sound": true,
   "sound_file": null
 }
