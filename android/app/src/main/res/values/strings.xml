@@ -10,4 +10,6 @@
     <string name="notif_text">Missed calls are relayed to your PC.</string>
 
     <string name="settings_title">RingKeeper settings</string>
+
+    <string name="whatsapp_listener_label">RingKeeper WhatsApp call capture</string>
 </resources>

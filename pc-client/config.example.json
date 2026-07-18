@@ -3,7 +3,7 @@
   "anon_key": "paste-your-anon-public-key",
   "email": "your-ringkeeper-account@example.com",
   "password": "your-account-password",
-  "popup_for": ["missed"],
+  "popup_for": ["missed", "whatsapp_missed"],
   "popup_max_age_seconds": 3600,
   "sound": true,
   "sound_file": null

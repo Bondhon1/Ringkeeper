@@ -25,7 +25,7 @@ class Config:
     anon_key: str
     email: str
     password: str
-    popup_for: list[str] = field(default_factory=lambda: ["missed"])
+    popup_for: list[str] = field(default_factory=lambda: ["missed", "whatsapp_missed"])
     # Only calls that occurred within this many seconds of "now" trigger a
     # popup + sound. Older rows (e.g. the one-time history backfill the phone
     # does on first run) go to the list silently instead of flooding the screen.
@@ -73,7 +73,7 @@ def load_config() -> Config:
     anon_key = os.environ.get("RINGKEEPER_ANON_KEY") or data.get("anon_key", "")
     email = os.environ.get("RINGKEEPER_EMAIL") or data.get("email", "")
     password = os.environ.get("RINGKEEPER_PASSWORD") or data.get("password", "")
-    popup_for = data.get("popup_for") or ["missed"]
+    popup_for = data.get("popup_for") or ["missed", "whatsapp_missed"]
     popup_max_age_seconds = int(data.get("popup_max_age_seconds", 600))
     sound = bool(data.get("sound", True))
     sound_file = data.get("sound_file") or None

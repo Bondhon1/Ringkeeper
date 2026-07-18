@@ -28,7 +28,7 @@ class CallRepository(private val context: Context) {
             PackageManager.PERMISSION_GRANTED
 
     @SuppressLint("HardwareIds")
-    private fun deviceId(): String =
+    fun deviceId(): String =
         AndroidSettings.Secure.getString(context.contentResolver, AndroidSettings.Secure.ANDROID_ID)
             ?: "unknown-device"
 
@@ -91,6 +91,37 @@ class CallRepository(private val context: Context) {
         }
         if (captured > 0) Log.i(TAG, "Captured $captured new call(s) into local DB")
         return captured
+    }
+
+    /**
+     * Record a call captured outside the CallLog — currently WhatsApp calls seen
+     * by [com.ringkeeper.app.service.WhatsAppCallListener]. These have no CallLog
+     * _ID, so [CallEntity.callLogId] is null and dedupe rides entirely on the
+     * unique [clientUid]: WhatsApp re-posts the same notification several times
+     * for one call, so the caller passes a [clientUid] that's stable per call
+     * (name + which second it happened + type). Returns true if a new row was
+     * inserted (false if it was a duplicate we've already stored).
+     */
+    suspend fun recordExternalCall(
+        callType: String,
+        callerName: String?,
+        number: String,
+        callTimeMillis: Long,
+        clientUid: String,
+        source: String,
+    ): Boolean {
+        val entity = CallEntity(
+            callLogId = null,
+            callerName = callerName,
+            number = number,
+            callType = callType,
+            callTimeMillis = callTimeMillis,
+            clientUid = clientUid,
+            source = source,
+        )
+        val inserted = dao.insertIgnore(entity) != -1L
+        if (inserted) Log.i(TAG, "Captured $callType call from $source into local DB")
+        return inserted
     }
 
     /**

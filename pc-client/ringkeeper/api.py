@@ -12,8 +12,10 @@ from .config import Config
 # Human-friendly labels + display order for call types in the UI.
 CALL_TYPE_LABELS: dict[str, str] = {
     "missed": "Missed",
+    "whatsapp_missed": "WA Missed",
     "rejected": "Rejected",
     "incoming": "Incoming",
+    "whatsapp_incoming": "WA Incoming",
     "outgoing": "Outgoing",
     "blocked": "Blocked",
     "voicemail": "Voicemail",

@@ -11,7 +11,7 @@ create table if not exists public.calls (
   caller_name  text,
   number       text not null,
   call_type    text not null default 'unknown'
-               check (call_type in ('missed','incoming','outgoing','rejected','blocked','voicemail','unknown')),
+               check (call_type in ('missed','incoming','outgoing','rejected','blocked','voicemail','unknown','whatsapp_missed','whatsapp_incoming')),
   call_time    timestamptz not null,
   received_at  timestamptz not null default now(),
   seen         boolean not null default false,

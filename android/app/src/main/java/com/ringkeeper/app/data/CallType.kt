@@ -15,6 +15,12 @@ object CallTypes {
     const val VOICEMAIL = "voicemail"
     const val UNKNOWN = "unknown"
 
+    // WhatsApp calls never appear in the CallLog, so they get their own canonical
+    // types (kept distinct from system calls so the PC can label/filter/pop them
+    // up separately). These must also be in the server's call_type CHECK set.
+    const val WHATSAPP_MISSED = "whatsapp_missed"
+    const val WHATSAPP_INCOMING = "whatsapp_incoming"
+
     fun fromCallLogType(type: Int): String = when (type) {
         CallLog.Calls.INCOMING_TYPE -> INCOMING
         CallLog.Calls.OUTGOING_TYPE -> OUTGOING

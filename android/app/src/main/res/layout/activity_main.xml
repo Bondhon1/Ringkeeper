@@ -52,6 +52,13 @@
             android:text="Battery optimization: unknown" />
 
         <TextView
+            android:id="@+id/txtWhatsApp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="WhatsApp call capture: unknown" />
+
+        <TextView
             android:id="@+id/txtStats"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -84,6 +91,13 @@
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
             android:text="3. Disable battery optimization" />
+
+        <Button
+            android:id="@+id/btnWhatsApp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="4. Enable WhatsApp call capture (optional)" />
 
         <Button
             android:id="@+id/btnStart"

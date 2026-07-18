@@ -10,6 +10,7 @@ import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.lifecycleScope
 import com.ringkeeper.app.data.CallRepository
 import com.ringkeeper.app.data.Settings
@@ -42,6 +43,7 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnGrantPermissions.setOnClickListener { requestPermissions() }
         binding.btnBattery.setOnClickListener { requestIgnoreBatteryOptimizations() }
+        binding.btnWhatsApp.setOnClickListener { openNotificationAccessSettings() }
         binding.btnStart.setOnClickListener { startMonitoring() }
     }
 
@@ -70,6 +72,19 @@ class MainActivity : AppCompatActivity() {
         refreshStatus()
     }
 
+    /**
+     * WhatsApp calls are captured via a NotificationListenerService, which needs
+     * the special "Notification access" grant — there's no runtime-permission
+     * dialog for it, so send the user to the system settings screen.
+     */
+    private fun openNotificationAccessSettings() {
+        val intent = Intent(AndroidSettings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+        startActivity(intent)
+    }
+
+    private fun hasNotificationAccess(): Boolean =
+        NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
+
     @SuppressLint("BatteryLife")
     private fun requestIgnoreBatteryOptimizations() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
@@ -94,6 +109,8 @@ class MainActivity : AppCompatActivity() {
             if (hasPerms) "Call log permission: granted" else "Call log permission: NOT granted"
         binding.txtBattery.text =
             if (batteryOk) "Battery optimization: disabled ✓" else "Battery optimization: ON (recommend disabling)"
+        binding.txtWhatsApp.text =
+            if (hasNotificationAccess()) "WhatsApp call capture: on ✓" else "WhatsApp call capture: off (optional)"
 
         lifecycleScope.launch {
             val (total, pending) = withContext(Dispatchers.IO) {

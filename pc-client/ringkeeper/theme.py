@@ -22,8 +22,10 @@ FG_DIM = "#6b7688"
 # Per-call-type accent colors --------------------------------------------------
 TYPE_COLORS: dict[str, str] = {
     "missed": "#f2555a",
+    "whatsapp_missed": "#f2555a",
     "rejected": "#f2555a",
     "incoming": "#33b969",
+    "whatsapp_incoming": "#25d366",  # WhatsApp brand green
     "outgoing": "#4c8dff",
     "blocked": "#e0a12f",
     "voicemail": "#a06bff",

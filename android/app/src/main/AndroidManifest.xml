@@ -8,7 +8,10 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- specialUse (not dataSync): a persistent call monitor must run
+         indefinitely, but dataSync foreground services are capped at ~6 cumulative
+         hours/24h on Android 14+ and get force-killed past that. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
@@ -40,7 +43,24 @@
         <service
             android:name=".service.CallMonitorService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Continuously observes the system call log to relay calls to the paired PC in real time." />
+        </service>
+
+        <!-- Captures WhatsApp calls (which never hit the CallLog) by reading
+             WhatsApp's call notifications. Bound by the system only after the
+             user grants "Notification access" in Settings. -->
+        <service
+            android:name=".service.WhatsAppCallListener"
+            android:exported="false"
+            android:label="@string/whatsapp_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <!-- Restart monitoring after reboot. -->
         <receiver

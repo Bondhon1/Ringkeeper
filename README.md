@@ -19,6 +19,16 @@ in the PC's list window, grouped by type. Only **missed** calls trigger the alwa
 popup, which stays on screen until you dismiss it. (Change which types pop up via `popup_for`
 in the PC client config — no rebuild needed.)
 
+**WhatsApp calls too.** WhatsApp calls never appear in the Android system call log, so they're
+captured separately by reading WhatsApp's **call notifications** (via a
+`NotificationListenerService`) — you grant a one-time "Notification access" like you do battery
+optimization. They're stored as their own types, `whatsapp_missed` and `whatsapp_incoming`, and
+`whatsapp_missed` pops up by default alongside regular missed calls. This needs the Android app
+plus the extra grant; nothing else is required. (Detection reads the notification text, which
+WhatsApp localizes — English is handled out of the box; see
+[`WhatsAppCallListener`](android/app/src/main/java/com/ringkeeper/app/service/WhatsAppCallListener.kt)
+to add other languages.)
+
 **Why Supabase (and not Vercel/Render/Fly).** The un-missable alert needs a live push to the
 PC and persistent storage. Supabase gives all three pieces free with no card: Postgres
 (storage), **Realtime** (a managed WebSocket that pushes each new row to the PC instantly),
@@ -73,7 +83,7 @@ copy config.example.json config.json     # then edit config.json
   "anon_key": "eyJhbGci…",
   "email": "your-ringkeeper-account@example.com",
   "password": "your-account-password",
-  "popup_for": ["missed"]
+  "popup_for": ["missed", "whatsapp_missed"]
 }
 ```
 
@@ -119,6 +129,9 @@ classic pyw/python environment mismatch:
      `password`. Tap **Test connection** (it signs in and checks access).
    - **Disable battery optimization** — important on Xiaomi/Samsung/Oppo, which aggressively
      kill background services.
+   - **(Optional) Enable WhatsApp call capture** — tap it and toggle **RingKeeper** on in the
+     system "Notification access" screen. This lets RingKeeper read WhatsApp's call
+     notifications (the only way to see WhatsApp calls, which never reach the call log).
    - Tap **Start monitoring**.
 
 **How it works:** a foreground service ("RingKeeper is watching for calls") registers a
@@ -129,6 +142,17 @@ automatically) and inserts unsynced rows via PostgREST, upserting on `client_uid
 never duplicate. If the phone is offline, calls pile up locally and flush automatically when
 connectivity returns (a network callback also nudges the queue). A boot receiver restarts
 monitoring after a reboot.
+
+WhatsApp calls take a parallel path: a `NotificationListenerService` (active once you grant
+Notification access) reads WhatsApp's call notifications, writes them to the same local Room DB
+(with `callLogId` null and `source = "whatsapp"`), and feeds the same sync queue. WhatsApp
+re-posts a notification several times per call, so a per-call `client_uid` (caller + second +
+type) plus a unique index collapse the repeats to one row.
+
+> **Existing Supabase project?** If you created your database before WhatsApp support, run
+> [supabase/add_whatsapp_call_types.sql](supabase/add_whatsapp_call_types.sql) once to allow the
+> two new `call_type` values (otherwise the phone's WhatsApp inserts are rejected). Fresh
+> projects get them from `schema.sql` automatically.
 
 ---
 
@@ -162,7 +186,7 @@ See **[supabase/schema.sql](supabase/schema.sql)** for the full definition. The 
 | `user_id`     | uuid          | `default auth.uid()`, FK → auth.users, RLS key    |
 | `caller_name` | text          | nullable                                          |
 | `number`      | text          | not null                                          |
-| `call_type`   | text          | missed / incoming / outgoing / rejected / blocked / voicemail / unknown |
+| `call_type`   | text          | missed / incoming / outgoing / rejected / blocked / voicemail / unknown / whatsapp_missed / whatsapp_incoming |
 | `call_time`   | timestamptz   | when the call happened                            |
 | `received_at` | timestamptz   | `default now()`                                   |
 | `seen`        | boolean       | `default false`                                   |
