@@ -83,7 +83,26 @@ You'll end up with four values used by **both** clients: `supabase_url`, `anon_k
 
 ## 2. Windows PC client (`pc-client/`)
 
-**Requirements:** Python **3.11+** (Tkinter ships with the python.org installer).
+**Requirements:** Python **3.11+** (Tkinter ships with the python.org installer;
+tick **"Add Python to PATH"** during install).
+
+### Easy way (recommended — no terminal, no admin)
+
+Double-click **`pc-client\setup.bat`**. It creates the virtual environment, installs
+dependencies, creates `config.json` from the example, and registers RingKeeper to start
+at every login — all **without administrator rights**. It then offers to start the app
+immediately. The only thing you must do by hand is open **`config.json`** and fill in your
+four Supabase values (below).
+
+Two companion double-click helpers sit next to it:
+
+| File            | What it does                                                        |
+|-----------------|--------------------------------------------------------------------|
+| `setup.bat`     | One-click first-time setup (venv + deps + config + autostart).     |
+| `start.bat`     | Start RingKeeper now (tray icon), without logging out.             |
+| `uninstall.bat` | Remove the autostart entry. Deletes no files.                      |
+
+### Manual way
 
 ```bash
 cd pc-client
@@ -122,11 +141,13 @@ also marks them seen in Supabase).
 .venv\Scripts\python.exe scripts\headless_test.py
 ```
 
-**Auto-start at login** — run with the **same interpreter** that has the packages installed
-(the venv); the installer derives `pythonw.exe` from the current interpreter to avoid the
-classic pyw/python environment mismatch:
+**Auto-start at login** — `setup.bat` already does this for you. To do it by hand, run with
+the **same interpreter** that has the packages installed (the venv); the installer derives
+`pythonw.exe` from the current interpreter to avoid the classic pyw/python environment
+mismatch. It writes a **per-user** `HKCU\...\Run` entry, so **no administrator rights are
+needed**:
 ```bash
-.venv\Scripts\python.exe install_autostart.py install     # register Task Scheduler entry
+.venv\Scripts\python.exe install_autostart.py install     # register per-user autostart
 .venv\Scripts\python.exe install_autostart.py status
 .venv\Scripts\python.exe install_autostart.py uninstall
 ```

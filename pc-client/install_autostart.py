@@ -1,12 +1,17 @@
 """Register (or remove) a Windows autostart entry for the RingKeeper PC client.
 
-Uses Task Scheduler (ONLOGON) so the client comes back after every login.
+Uses the per-user "Run" registry key
+(HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run) so the client starts
+at every login. This deliberately does NOT use Task Scheduler: creating an
+ONLOGON task requires Administrator rights, which makes it hard for
+non-technical users to set up. The HKCU Run key needs no elevation.
 
 Critically — matching the spec's note about the pyw/python environment mismatch
-bug — the scheduled action uses the pythonw.exe that sits next to the *current*
+bug — the autostart command uses the pythonw.exe that sits next to the *current*
 interpreter (i.e. the venv you ran this script with), NOT whatever `pythonw`
 resolves to on PATH. Run this with the same interpreter you installed the
-requirements into:
+requirements into. The easiest way is to double-click setup.bat, which does this
+for you. Manually:
 
     .venv\\Scripts\\python.exe install_autostart.py install
     .venv\\Scripts\\python.exe install_autostart.py uninstall
@@ -16,11 +21,11 @@ requirements into:
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
-TASK_NAME = "RingKeeperClient"
+VALUE_NAME = "RingKeeperClient"
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 
 def pythonw_path() -> Path:
@@ -34,49 +39,57 @@ def main_script() -> Path:
     return Path(__file__).resolve().parent / "main.py"
 
 
+def autostart_command() -> str:
+    """The exact command Windows runs at logon: quoted interpreter + script."""
+    return f'"{pythonw_path()}" "{main_script()}"'
+
+
 def install() -> int:
-    pyw = pythonw_path()
-    script = main_script()
-    # /TR value: quoted interpreter + quoted script. schtasks wants the whole
-    # thing as one argument, with inner quotes.
-    run = f'"{pyw}" "{script}"'
-    cmd = [
-        "schtasks", "/Create",
-        "/TN", TASK_NAME,
-        "/TR", run,
-        "/SC", "ONLOGON",
-        "/RL", "LIMITED",
-        "/F",
-    ]
-    print("Registering Task Scheduler entry:")
-    print("   interpreter:", pyw)
-    print("   script:     ", script)
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    sys.stdout.write(result.stdout)
-    sys.stderr.write(result.stderr)
-    if result.returncode == 0:
-        print(f"\nDone. '{TASK_NAME}' will start at next logon.")
-        print("Start it now with:  schtasks /Run /TN", TASK_NAME)
-    return result.returncode
+    import winreg  # Windows-only; imported lazily so --help works anywhere.
+
+    command = autostart_command()
+    print("Registering autostart (per-user, no admin needed):")
+    print("   interpreter:", pythonw_path())
+    print("   script:     ", main_script())
+    with winreg.OpenKey(
+        winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE
+    ) as key:
+        winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, command)
+    print(f"\nDone. '{VALUE_NAME}' will start automatically at your next login.")
+    print("It is NOT running yet — start it now by double-clicking start.bat,")
+    print("or log out and back in.")
+    return 0
 
 
 def uninstall() -> int:
-    result = subprocess.run(
-        ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
-        capture_output=True, text=True,
-    )
-    sys.stdout.write(result.stdout)
-    sys.stderr.write(result.stderr)
-    return result.returncode
+    import winreg
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE
+        ) as key:
+            winreg.DeleteValue(key, VALUE_NAME)
+        print(f"Removed autostart entry '{VALUE_NAME}'.")
+        return 0
+    except FileNotFoundError:
+        print(f"No autostart entry '{VALUE_NAME}' found — nothing to remove.")
+        return 0
 
 
 def status() -> int:
-    result = subprocess.run(
-        ["schtasks", "/Query", "/TN", TASK_NAME, "/V", "/FO", "LIST"],
-        capture_output=True, text=True,
-    )
-    sys.stdout.write(result.stdout or result.stderr)
-    return result.returncode
+    import winreg
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, VALUE_NAME)
+        print(f"Autostart is INSTALLED for '{VALUE_NAME}':")
+        print("   ", value)
+        return 0
+    except FileNotFoundError:
+        print(f"Autostart is NOT installed for '{VALUE_NAME}'.")
+        return 1
 
 
 def main() -> None:
@@ -86,7 +99,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     if sys.platform != "win32":
-        print("This installer targets Windows Task Scheduler only.")
+        print("This installer targets Windows only.")
         sys.exit(1)
     sys.exit({"install": install, "uninstall": uninstall, "status": status}[args.action]())
 
