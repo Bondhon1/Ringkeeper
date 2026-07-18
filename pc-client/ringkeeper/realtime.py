@@ -24,7 +24,7 @@ from .config import Config
 
 log = logging.getLogger("ringkeeper.realtime")
 
-NewCallHandler = Callable[[dict[str, Any]], None]
+RecordHandler = Callable[[dict[str, Any]], None]
 StatusHandler = Callable[[bool], None]
 
 TOKEN_RECHECK_SECONDS = 60
@@ -35,13 +35,17 @@ class SupabaseRealtime:
         self,
         config: Config,
         tokens: TokenManager,
-        on_new_call: NewCallHandler,
+        on_new_call: RecordHandler,
         on_status: StatusHandler | None = None,
+        on_app_state: RecordHandler | None = None,
+        on_message: RecordHandler | None = None,
     ):
         self.config = config
         self.tokens = tokens
         self.on_new_call = on_new_call
         self.on_status = on_status or (lambda _c: None)
+        self.on_app_state = on_app_state or (lambda _r: None)
+        self.on_message = on_message or (lambda _r: None)
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop = threading.Event()
@@ -81,13 +85,28 @@ class SupabaseRealtime:
                 channel = client.channel("rk-calls")
                 channel.on_postgres_changes(
                     "INSERT",
-                    callback=self._on_insert,
+                    callback=self._on_call_insert,
                     table="calls",
+                    schema="public",
+                )
+                # app_state changes (control flag + phone heartbeat): catch INSERT
+                # and UPDATE — the phone creates the row once, then updates it.
+                channel.on_postgres_changes(
+                    "*",
+                    callback=self._on_app_state,
+                    table="app_state",
+                    schema="public",
+                )
+                # Ephemeral WhatsApp messages the phone relays for a one-time popup.
+                channel.on_postgres_changes(
+                    "INSERT",
+                    callback=self._on_message,
+                    table="messages",
                     schema="public",
                 )
                 await channel.subscribe()
 
-                log.info("Subscribed to Realtime INSERTs on public.calls")
+                log.info("Subscribed to Realtime on public.calls, app_state, messages")
                 self.on_status(True)
                 backoff = 1.0
 
@@ -116,11 +135,34 @@ class SupabaseRealtime:
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 30.0)
 
-    def _on_insert(self, payload: dict[str, Any]) -> None:
+    @staticmethod
+    def _record(payload: dict[str, Any]) -> dict[str, Any] | None:
         record = (payload.get("data") or {}).get("record")
-        if not isinstance(record, dict):
+        return record if isinstance(record, dict) else None
+
+    def _on_call_insert(self, payload: dict[str, Any]) -> None:
+        record = self._record(payload)
+        if record is None:
             return
         try:
             self.on_new_call(record)
         except Exception:  # noqa: BLE001 — a bad handler must not kill the socket
             log.exception("on_new_call handler raised")
+
+    def _on_app_state(self, payload: dict[str, Any]) -> None:
+        record = self._record(payload)
+        if record is None:
+            return
+        try:
+            self.on_app_state(record)
+        except Exception:  # noqa: BLE001
+            log.exception("on_app_state handler raised")
+
+    def _on_message(self, payload: dict[str, Any]) -> None:
+        record = self._record(payload)
+        if record is None:
+            return
+        try:
+            self.on_message(record)
+        except Exception:  # noqa: BLE001
+            log.exception("on_message handler raised")

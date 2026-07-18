@@ -157,6 +157,47 @@ class CallRepository(private val context: Context) {
     suspend fun unsyncedCount(): Int = dao.unsyncedCount()
     suspend fun totalCount(): Int = dao.total()
 
+    // --- shared on/off control + heartbeat + WhatsApp message relay ----------
+
+    /** The local mirror of the shared monitoring flag; gates all capture. */
+    fun isMonitoringEnabled(): Boolean = settings.monitoringEnabled
+
+    /**
+     * One control cycle, run periodically by [com.ringkeeper.app.service.CallMonitorService]:
+     *  - adopt the server's monitoring flag (the PC may have flipped it), and
+     *  - write the phone's heartbeat so the PC can tell "off" from "gone".
+     * Best-effort; leaves local state untouched on any network hiccup.
+     */
+    suspend fun syncControlAndHeartbeat() {
+        if (!settings.isConfigured) return
+        val api = SupabaseClient(context)
+        api.fetchMonitoringEnabled()?.let { remote ->
+            if (remote != settings.monitoringEnabled) {
+                Log.i(TAG, "Monitoring flag adopted from server: $remote")
+                settings.monitoringEnabled = remote
+            }
+        }
+        api.sendHeartbeat()
+    }
+
+    /** Flip the shared flag (local first for instant UI, then push to server). */
+    suspend fun setMonitoring(enabled: Boolean, source: String) {
+        settings.monitoringEnabled = enabled
+        if (settings.isConfigured) {
+            SupabaseClient(context).pushMonitoringEnabled(enabled, source)
+        }
+    }
+
+    /**
+     * Relay a WhatsApp message to the PC — ephemeral and un-queued: not stored
+     * locally, and simply dropped if we're off or offline. Returns true if the
+     * server accepted it.
+     */
+    suspend fun relayWhatsAppMessage(sender: String, preview: String?, clientUid: String): Boolean {
+        if (!settings.monitoringEnabled || !settings.isConfigured) return false
+        return SupabaseClient(context).relayMessage(sender, preview, clientUid)
+    }
+
     companion object {
         private const val TAG = "CallRepository"
     }

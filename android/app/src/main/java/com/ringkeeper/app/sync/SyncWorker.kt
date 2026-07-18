@@ -18,6 +18,10 @@ class SyncWorker(
 
     override suspend fun doWork(): Result {
         val repo = CallRepository(applicationContext)
+        if (!repo.isMonitoringEnabled()) {
+            Log.i(TAG, "Monitoring paused (shared off-switch) — skipping sync cycle")
+            return Result.success()
+        }
         return try {
             // Capture anything new locally first (works even if this run was
             // triggered while briefly offline between constraint checks).

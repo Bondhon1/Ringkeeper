@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.telephony.TelephonyManager
 import android.util.Log
+import com.ringkeeper.app.data.Settings
 import com.ringkeeper.app.sync.SyncScheduler
 
 /**
@@ -23,7 +24,9 @@ class PhoneStateReceiver : BroadcastReceiver() {
 
         val wasActive = lastState == TelephonyManager.EXTRA_STATE_RINGING ||
             lastState == TelephonyManager.EXTRA_STATE_OFFHOOK
-        if (state == TelephonyManager.EXTRA_STATE_IDLE && wasActive) {
+        if (state == TelephonyManager.EXTRA_STATE_IDLE && wasActive &&
+            Settings.get(context).monitoringEnabled
+        ) {
             Log.d(TAG, "Call ended → scheduling scan+sync")
             // WorkManager's few-second latency usually gives the CallLog row
             // time to be written before SyncWorker scans.

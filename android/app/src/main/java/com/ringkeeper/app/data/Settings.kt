@@ -31,6 +31,16 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         get() = supabaseUrl.isNotEmpty() && anonKey.isNotEmpty() &&
             email.isNotEmpty() && password.isNotEmpty()
 
+    /**
+     * The shared on/off instruction, mirrored locally so capture can be gated
+     * without a network round-trip. The control loop keeps this in sync with the
+     * `app_state` row on the server (which the PC can also flip). Defaults to true
+     * so a fresh install starts capturing once monitoring is started.
+     */
+    var monitoringEnabled: Boolean
+        get() = prefs.getBoolean(KEY_MONITORING, true)
+        set(value) = prefs.edit().putBoolean(KEY_MONITORING, value).apply()
+
     private fun base(): String = supabaseUrl.trimEnd('/')
     fun restUrl(): String = base() + "/rest/v1"
     fun authUrl(): String = base() + "/auth/v1"
@@ -58,6 +68,7 @@ class Settings private constructor(private val prefs: SharedPreferences) {
         private const val KEY_ANON = "anon_key"
         private const val KEY_EMAIL = "email"
         private const val KEY_PASSWORD = "password"
+        private const val KEY_MONITORING = "monitoring_enabled"
         private const val KEY_ACCESS = "access_token"
         private const val KEY_REFRESH = "refresh_token"
         private const val KEY_EXPIRES_AT = "expires_at"

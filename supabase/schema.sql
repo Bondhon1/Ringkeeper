@@ -50,3 +50,63 @@ create policy "own calls: update" on public.calls
 -- 3. Realtime ----------------------------------------------------------------
 -- Add the table to the realtime publication so INSERT/UPDATE events are streamed.
 alter publication supabase_realtime add table public.calls;
+
+-- 4. app_state — shared on/off control + phone heartbeat ----------------------
+-- One row per account, shared by the phone and PC. `monitoring_enabled` is the
+-- shared instruction: either device (or the PC closing) can flip it and the
+-- other obeys. `phone_last_seen` is the phone's heartbeat, so the PC can tell
+-- "intentionally off" apart from "the phone went away".
+create table if not exists public.app_state (
+  user_id             uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  monitoring_enabled  boolean not null default true,
+  control_source      text,                    -- 'phone' | 'pc' | 'pc_closed'
+  control_updated_at  timestamptz not null default now(),
+  phone_last_seen     timestamptz
+);
+
+alter table public.app_state enable row level security;
+
+drop policy if exists "own state: select" on public.app_state;
+create policy "own state: select" on public.app_state
+  for select using (user_id = auth.uid());
+
+drop policy if exists "own state: insert" on public.app_state;
+create policy "own state: insert" on public.app_state
+  for insert with check (user_id = auth.uid());
+
+drop policy if exists "own state: update" on public.app_state;
+create policy "own state: update" on public.app_state
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+alter publication supabase_realtime add table public.app_state;
+
+-- 5. messages — ephemeral WhatsApp message relay ------------------------------
+-- The phone inserts one row per new WhatsApp message; the PC shows it and then
+-- DELETEs it. Nothing is meant to persist — it's a transient push channel.
+create table if not exists public.messages (
+  id           bigint generated always as identity primary key,
+  user_id      uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  sender       text not null,
+  preview      text,
+  received_at  timestamptz not null default now(),
+  client_uid   text
+);
+
+create unique index if not exists messages_client_uid_key on public.messages (client_uid);
+create index if not exists messages_user_time_idx on public.messages (user_id, received_at desc);
+
+alter table public.messages enable row level security;
+
+drop policy if exists "own messages: select" on public.messages;
+create policy "own messages: select" on public.messages
+  for select using (user_id = auth.uid());
+
+drop policy if exists "own messages: insert" on public.messages;
+create policy "own messages: insert" on public.messages
+  for insert with check (user_id = auth.uid());
+
+drop policy if exists "own messages: delete" on public.messages;
+create policy "own messages: delete" on public.messages
+  for delete using (user_id = auth.uid());
+
+alter publication supabase_realtime add table public.messages;

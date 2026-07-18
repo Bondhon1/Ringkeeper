@@ -28,6 +28,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -51,6 +53,26 @@ class CallMonitorService : Service() {
         createChannel()
         registerCallLogObserver()
         registerNetworkCallback()
+        startControlLoop()
+    }
+
+    /**
+     * Periodically adopts the shared monitoring flag (so a change made on the PC
+     * reaches the phone) and sends the phone's heartbeat. Runs whenever the
+     * service is alive, independent of whether capture is currently enabled — the
+     * heartbeat is how the PC tells "intentionally off" from "phone gone".
+     */
+    private fun startControlLoop() {
+        scope.launch {
+            while (isActive) {
+                try {
+                    repo.syncControlAndHeartbeat()
+                } catch (e: Exception) {
+                    Log.w(TAG, "control loop: ${e.message}")
+                }
+                delay(CONTROL_INTERVAL_MS)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -73,10 +95,13 @@ class CallMonitorService : Service() {
             return START_NOT_STICKY
         }
         SyncScheduler.ensurePeriodic(applicationContext)
-        // Catch up on anything that happened while we weren't watching.
-        scope.launch {
-            repo.scanCallLog()
-            SyncScheduler.syncNow(applicationContext)
+        // Catch up on anything that happened while we weren't watching (unless
+        // paused via the shared off-switch).
+        if (repo.isMonitoringEnabled()) {
+            scope.launch {
+                repo.scanCallLog()
+                SyncScheduler.syncNow(applicationContext)
+            }
         }
         return START_STICKY
     }
@@ -88,6 +113,7 @@ class CallMonitorService : Service() {
         val handler = Handler(observerThread.looper)
         val observer = object : ContentObserver(handler) {
             override fun onChange(selfChange: Boolean) {
+                if (!repo.isMonitoringEnabled()) return // paused via the shared off-switch
                 Log.d(TAG, "CallLog changed → scanning")
                 scope.launch {
                     val captured = repo.scanCallLog()
@@ -158,6 +184,7 @@ class CallMonitorService : Service() {
         private const val TAG = "CallMonitorService"
         private const val CHANNEL_ID = "ringkeeper_monitor"
         private const val NOTIF_ID = 1
+        private const val CONTROL_INTERVAL_MS = 30_000L
 
         fun start(context: Context) {
             val intent = Intent(context, CallMonitorService::class.java)

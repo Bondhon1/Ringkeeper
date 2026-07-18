@@ -106,5 +106,12 @@
             android:layout_marginTop="8dp"
             android:text="Start monitoring" />
 
+        <Button
+            android:id="@+id/btnToggle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Turn off (pause both devices)" />
+
     </LinearLayout>
 </ScrollView>

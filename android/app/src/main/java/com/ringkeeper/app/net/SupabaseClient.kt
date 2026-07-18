@@ -76,13 +76,18 @@ class SupabaseClient(context: Context) {
         return result
     }
 
-    private fun send(url: String, body: okhttp3.RequestBody, token: String): PostResult {
+    private fun send(
+        url: String,
+        body: okhttp3.RequestBody,
+        token: String,
+        prefer: String = "resolution=ignore-duplicates,return=minimal",
+    ): PostResult {
         val request = Request.Builder()
             .url(url)
             .addHeader("apikey", settings.anonKey)
             .addHeader("Authorization", "Bearer $token")
             .addHeader("Content-Type", "application/json")
-            .addHeader("Prefer", "resolution=ignore-duplicates,return=minimal")
+            .addHeader("Prefer", prefer)
             .post(body)
             .build()
         return try {
@@ -98,6 +103,94 @@ class SupabaseClient(context: Context) {
         } catch (e: Exception) {
             PostResult.Retry(e.message ?: "network error")
         }
+    }
+
+    // --- shared control + heartbeat + message relay --------------------------
+
+    /**
+     * Result of a control/state call. Booleans model "did it work"; the flag
+     * fetch returns the value or null when unknown (network/first run).
+     */
+
+    /**
+     * Upsert the phone's heartbeat (`phone_last_seen = now`). Creates the
+     * app_state row on first run (monitoring defaults to enabled) and only
+     * touches phone_last_seen thereafter, so it never clobbers the flag.
+     */
+    fun sendHeartbeat(): Boolean {
+        val row = JSONObject().put("phone_last_seen", iso.format(Date()))
+        return upsert("app_state", "user_id", row) is PostResult.Accepted
+    }
+
+    /**
+     * Read the shared monitoring flag from the server. Returns null if it can't
+     * be determined (no row yet, or a network error) so callers can leave the
+     * local value untouched.
+     */
+    fun fetchMonitoringEnabled(): Boolean? {
+        val token = try {
+            auth.accessToken()
+        } catch (e: AuthException) {
+            return null
+        }
+        val request = Request.Builder()
+            .url("${settings.restUrl()}/app_state?select=monitoring_enabled&limit=1")
+            .addHeader("apikey", settings.anonKey)
+            .addHeader("Authorization", "Bearer $token")
+            .get()
+            .build()
+        return try {
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                val arr = JSONArray(resp.body?.string().orEmpty())
+                if (arr.length() == 0) null else arr.getJSONObject(0).optBoolean("monitoring_enabled")
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Flip the shared monitoring flag (source = "phone" when the user taps it). */
+    fun pushMonitoringEnabled(enabled: Boolean, source: String): Boolean {
+        val row = JSONObject()
+            .put("monitoring_enabled", enabled)
+            .put("control_source", source)
+            .put("control_updated_at", iso.format(Date()))
+        return upsert("app_state", "user_id", row) is PostResult.Accepted
+    }
+
+    /**
+     * Relay one WhatsApp message to the PC as an ephemeral row (the PC shows it,
+     * then deletes it). Best-effort and un-queued by design — messages are not
+     * stored, so if we're offline it's simply dropped.
+     */
+    fun relayMessage(sender: String, preview: String?, clientUid: String): Boolean {
+        val row = JSONObject()
+            .put("sender", sender)
+            .put("preview", preview ?: JSONObject.NULL)
+            .put("client_uid", clientUid)
+        return upsert("messages", "client_uid", row) is PostResult.Accepted
+    }
+
+    /** Generic upsert used by the control/message helpers above. */
+    private fun upsert(table: String, onConflict: String, row: JSONObject): PostResult {
+        val body = JSONArray().put(row).toString().toRequestBody(JSON)
+        val url = "${settings.restUrl()}/$table?on_conflict=$onConflict"
+        val token = try {
+            auth.accessToken()
+        } catch (e: AuthException) {
+            return PostResult.Retry("auth: ${e.message}")
+        }
+        val prefer = "resolution=merge-duplicates,return=minimal"
+        val result = send(url, body, token, prefer)
+        if (result is PostResult.Retry && result.reason.startsWith("401")) {
+            return try {
+                send(url, body, auth.forceSignIn(), prefer)
+            } catch (e: AuthException) {
+                PostResult.Retry("auth: ${e.message}")
+            }
+        }
+        return result
     }
 
     /** Used by the settings screen's "Test connection" button. */

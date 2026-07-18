@@ -6,5 +6,7 @@
   "popup_for": ["missed", "whatsapp_missed"],
   "popup_max_age_seconds": 3600,
   "sound": true,
-  "sound_file": null
+  "sound_file": null,
+  "phone_inactive_after_seconds": 180,
+  "set_off_on_exit": true
 }

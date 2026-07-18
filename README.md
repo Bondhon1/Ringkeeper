@@ -29,6 +29,23 @@ WhatsApp localizes — English is handled out of the box; see
 [`WhatsAppCallListener`](android/app/src/main/java/com/ringkeeper/app/service/WhatsAppCallListener.kt)
 to add other languages.)
 
+**Shared on/off switch.** A single instruction, stored in Supabase (`app_state`), pauses/resumes
+**both** devices at once. Turn it off from the phone (**Turn off** button) or the PC (tray →
+**Turn off**); either stops the phone capturing/syncing and the PC popping up. **Closing the PC
+client also flips it off** (set `set_off_on_exit: false` in the PC config to opt out). The phone
+keeps a lightweight loop running while off, so it obeys a **Turn on** from either side within
+~30s.
+
+**Phone-inactive alerts.** The phone sends a heartbeat every ~30s. If the PC stops hearing it
+(phone powered off, offline, or the app was killed) it raises a "phone inactive" popup and turns
+the tray icon amber — so you know the bridge is down rather than assuming "no calls." Turning
+monitoring *off* does **not** trigger this (that's intentional and the heartbeat keeps flowing);
+only an actually-absent phone does.
+
+**WhatsApp messages (ephemeral).** New WhatsApp messages are relayed to the PC as a one-time
+popup (sender + preview) and **never stored** — the phone inserts a row into `messages`, the PC
+shows it and immediately deletes it. Requires the same Notification access as WhatsApp calls.
+
 **Why Supabase (and not Vercel/Render/Fly).** The un-missable alert needs a live push to the
 PC and persistent storage. Supabase gives all three pieces free with no card: Postgres
 (storage), **Realtime** (a managed WebSocket that pushes each new row to the PC instantly),
@@ -83,7 +100,9 @@ copy config.example.json config.json     # then edit config.json
   "anon_key": "eyJhbGci…",
   "email": "your-ringkeeper-account@example.com",
   "password": "your-account-password",
-  "popup_for": ["missed", "whatsapp_missed"]
+  "popup_for": ["missed", "whatsapp_missed"],
+  "phone_inactive_after_seconds": 180,
+  "set_off_on_exit": true
 }
 ```
 
@@ -149,10 +168,12 @@ Notification access) reads WhatsApp's call notifications, writes them to the sam
 re-posts a notification several times per call, so a per-call `client_uid` (caller + second +
 type) plus a unique index collapse the repeats to one row.
 
-> **Existing Supabase project?** If you created your database before WhatsApp support, run
-> [supabase/add_whatsapp_call_types.sql](supabase/add_whatsapp_call_types.sql) once to allow the
-> two new `call_type` values (otherwise the phone's WhatsApp inserts are rejected). Fresh
-> projects get them from `schema.sql` automatically.
+> **Existing Supabase project?** If you created your database before these features, run these
+> once in the SQL Editor (fresh projects get everything from `schema.sql` automatically):
+> - [supabase/add_whatsapp_call_types.sql](supabase/add_whatsapp_call_types.sql) — the two new
+>   `call_type` values (otherwise WhatsApp call inserts are rejected).
+> - [supabase/add_control_and_messages.sql](supabase/add_control_and_messages.sql) — the
+>   `app_state` (shared on/off + heartbeat) and `messages` (ephemeral) tables.
 
 ---
 
@@ -191,6 +212,14 @@ See **[supabase/schema.sql](supabase/schema.sql)** for the full definition. The 
 | `received_at` | timestamptz   | `default now()`                                   |
 | `seen`        | boolean       | `default false`                                   |
 | `client_uid`  | text (unique) | phone-side dedupe key (idempotent inserts)        |
+
+Two more tables back the control/messaging features (see `schema.sql`):
+
+- **`app_state`** — one row per account: `monitoring_enabled` (the shared on/off instruction,
+  flipped by either device), `control_source`, `control_updated_at`, and `phone_last_seen` (the
+  phone's heartbeat). Realtime-streamed so the PC reacts to both flag flips and heartbeats.
+- **`messages`** — ephemeral WhatsApp message relay: the phone inserts `sender` + `preview`, the
+  PC shows a popup and immediately deletes the row. Nothing persists.
 
 ## Security notes
 

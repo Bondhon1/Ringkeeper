@@ -45,6 +45,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnBattery.setOnClickListener { requestIgnoreBatteryOptimizations() }
         binding.btnWhatsApp.setOnClickListener { openNotificationAccessSettings() }
         binding.btnStart.setOnClickListener { startMonitoring() }
+        binding.btnToggle.setOnClickListener { toggleMonitoring() }
     }
 
     override fun onResume() {
@@ -70,6 +71,20 @@ class MainActivity : AppCompatActivity() {
         }
         CallMonitorService.start(this)
         refreshStatus()
+    }
+
+    /**
+     * Flip the shared on/off instruction. This pauses/resumes capture on the
+     * phone AND popups on the PC (via the app_state row). Turning back on keeps
+     * the service running so the change can propagate either way.
+     */
+    private fun toggleMonitoring() {
+        val newEnabled = !settings.monitoringEnabled
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { repo.setMonitoring(newEnabled, source = "phone") }
+            if (newEnabled) CallMonitorService.start(this@MainActivity)
+            refreshStatus()
+        }
     }
 
     /**
@@ -111,6 +126,10 @@ class MainActivity : AppCompatActivity() {
             if (batteryOk) "Battery optimization: disabled ✓" else "Battery optimization: ON (recommend disabling)"
         binding.txtWhatsApp.text =
             if (hasNotificationAccess()) "WhatsApp call capture: on ✓" else "WhatsApp call capture: off (optional)"
+
+        val enabled = settings.monitoringEnabled
+        binding.btnToggle.text =
+            if (enabled) "Turn off (pause both devices)" else "Turn on (resume both devices)"
 
         lifecycleScope.launch {
             val (total, pending) = withContext(Dispatchers.IO) {

@@ -29,6 +29,10 @@ TASKBAR_ALLOWANCE = 52
 MAX_VISIBLE = 5
 AVATAR = 46
 
+# WhatsApp-message popups are ephemeral: they auto-dismiss (nothing is stored).
+MESSAGE_ACCENT = "#25d366"
+MESSAGE_DISMISS_MS = 12000
+
 
 class PopupManager:
     def __init__(self, root: tk.Tk, api: SupabaseRest):
@@ -117,6 +121,75 @@ class PopupManager:
 
         self._open.append(win)
         self._enforce_cap()
+        self._reflow()
+
+    def show_message(self, sender: str, preview: str) -> None:
+        """A transient WhatsApp-message card. Auto-dismisses; nothing is stored."""
+        accent = MESSAGE_ACCENT
+        name = sender or "WhatsApp"
+
+        win = tk.Toplevel(self.root)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        win.configure(bg=theme.BG_BORDER)
+        win.resizable(False, False)
+
+        body = tk.Frame(win, bg=theme.BG_CARD)
+        body.pack(fill="both", expand=True, padx=1, pady=1)
+        tk.Frame(body, bg=accent, width=4).pack(side="left", fill="y")
+
+        content = tk.Frame(body, bg=theme.BG_CARD)
+        content.pack(side="left", fill="both", expand=True, padx=(12, 12), pady=10)
+
+        header = tk.Frame(content, bg=theme.BG_CARD)
+        header.pack(fill="x")
+        tk.Label(
+            header, text="● WhatsApp message", bg=theme.BG_CARD, fg=accent,
+            font=(theme.FONT_SEMI, 9),
+        ).pack(side="left")
+        close = tk.Label(
+            header, text="✕", bg=theme.BG_CARD, fg=theme.FG_DIM,
+            font=(theme.FONT, 10), cursor="hand2",
+        )
+        close.pack(side="right")
+        close.bind("<Button-1>", lambda _e: self._close_message(win))
+        close.bind("<Enter>", lambda _e: close.configure(fg=theme.FG))
+        close.bind("<Leave>", lambda _e: close.configure(fg=theme.FG_DIM))
+
+        row = tk.Frame(content, bg=theme.BG_CARD)
+        row.pack(fill="x", pady=(8, 0))
+        av = tk.Canvas(
+            row, width=AVATAR, height=AVATAR, bg=theme.BG_CARD, highlightthickness=0,
+        )
+        av.pack(side="left")
+        av.create_oval(2, 2, AVATAR - 2, AVATAR - 2, fill=accent, outline="")
+        av.create_text(
+            AVATAR / 2, AVATAR / 2, text=theme.initial_of(name),
+            fill="#ffffff", font=(theme.FONT_SEMI, 16),
+        )
+        text_col = tk.Frame(row, bg=theme.BG_CARD)
+        text_col.pack(side="left", fill="x", expand=True, padx=(12, 0))
+        tk.Label(
+            text_col, text=name, bg=theme.BG_CARD, fg=theme.FG,
+            font=(theme.FONT_SEMI, 13), anchor="w", justify="left",
+        ).pack(fill="x")
+        tk.Label(
+            text_col, text=preview, bg=theme.BG_CARD, fg=theme.FG_SUBTLE,
+            font=(theme.FONT, 10), anchor="w", justify="left", wraplength=POPUP_W - 100,
+        ).pack(fill="x")
+
+        self._open.append(win)
+        self._enforce_cap()
+        self._reflow()
+        win.after(MESSAGE_DISMISS_MS, lambda: self._close_message(win))
+
+    def _close_message(self, win: tk.Toplevel) -> None:
+        if win in self._open:
+            self._open.remove(win)
+        try:
+            win.destroy()
+        except tk.TclError:
+            pass
         self._reflow()
 
     def _enforce_cap(self) -> None:

@@ -42,25 +42,38 @@ class WhatsAppCallListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName !in WHATSAPP_PACKAGES) return
+        // Paused via the shared off-switch → capture nothing.
+        if (!repo.isMonitoringEnabled()) return
 
         val n = sbn.notification ?: return
         // Skip the "checking for new messages" foreground/service notification and
-        // the group summary — neither is a call.
+        // the group summary — neither is a call or a message we want.
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         if (n.category == Notification.CATEGORY_SERVICE) return
 
         val extras = n.extras
         val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
         val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
-        // Every call notification names the caller in the title; without it we
-        // can't attribute the call, so there's nothing useful to store.
+        // Every call/message notification names the sender in the title; without
+        // it we can't attribute anything, so there's nothing useful to relay.
         if (title.isNullOrBlank()) return
 
-        val callType = classify(n.category, text) ?: return
-        // WhatsApp notifications carry no phone number, only the contact's name.
-        val callerName = title
-        val callTime = if (n.`when` > 0L) n.`when` else sbn.postTime
+        val callType = classify(n.category, text)
+        if (callType != null) {
+            recordCall(callType, title, n, sbn)
+        } else if (isMessage(n.category, extras, text)) {
+            relayMessage(title, text, n, sbn)
+        }
+    }
 
+    private fun recordCall(
+        callType: String,
+        title: String,
+        n: Notification,
+        sbn: StatusBarNotification,
+    ) {
+        // WhatsApp notifications carry no phone number, only the contact's name.
+        val callTime = if (n.`when` > 0L) n.`when` else sbn.postTime
         // Stable per call: repeated posts of the same ring (or the same missed
         // entry) share a name, second, and type, so they collapse to one row.
         val clientUid = "wa-${repo.deviceId()}-$callType-${sanitize(title)}-${callTime / 1000}"
@@ -68,15 +81,38 @@ class WhatsAppCallListener : NotificationListenerService() {
         scope.launch {
             val inserted = repo.recordExternalCall(
                 callType = callType,
-                callerName = callerName,
+                callerName = title,
                 number = NUMBER_LABEL,
                 callTimeMillis = callTime,
                 clientUid = clientUid,
                 source = CallEntity.SOURCE_WHATSAPP,
             )
             if (inserted) {
-                Log.d(TAG, "WhatsApp $callType from $callerName")
+                Log.d(TAG, "WhatsApp $callType from $title")
                 SyncScheduler.syncNow(applicationContext)
+            }
+        }
+    }
+
+    /**
+     * Relay a new WhatsApp message to the PC as an ephemeral entry (not stored on
+     * the phone). Deduped on sender + message text so WhatsApp re-posting the same
+     * conversation notification doesn't fire it twice; a genuinely new message has
+     * new text and relays once.
+     */
+    private fun relayMessage(
+        title: String,
+        text: String,
+        n: Notification,
+        sbn: StatusBarNotification,
+    ) {
+        if (text.isBlank()) return
+        val whenMs = if (n.`when` > 0L) n.`when` else sbn.postTime
+        val clientUid =
+            "wamsg-${repo.deviceId()}-${sanitize(title)}-${text.hashCode()}-${whenMs / 1000}"
+        scope.launch {
+            if (repo.relayWhatsAppMessage(sender = title, preview = text, clientUid = clientUid)) {
+                Log.d(TAG, "WhatsApp message from $title relayed")
             }
         }
     }
@@ -104,6 +140,18 @@ class WhatsAppCallListener : NotificationListenerService() {
             return CallTypes.WHATSAPP_INCOMING
         }
         return null
+    }
+
+    /**
+     * Whether a non-call WhatsApp notification is an actual chat message (as
+     * opposed to backup/"web is active"/etc.). Relies on the messaging category
+     * or a MessagingStyle payload (EXTRA_MESSAGES), and ignores WhatsApp's
+     * generic aggregate notification titled just "WhatsApp".
+     */
+    private fun isMessage(category: String?, extras: android.os.Bundle?, text: String): Boolean {
+        if (text.isBlank()) return false
+        val hasMessagingStyle = extras?.containsKey(Notification.EXTRA_MESSAGES) == true
+        return category == Notification.CATEGORY_MESSAGE || hasMessagingStyle
     }
 
     /** Keep clientUids index- and log-friendly regardless of the contact's name. */

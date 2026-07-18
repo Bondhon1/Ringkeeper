@@ -34,6 +34,12 @@ class Config:
     sound: bool = True
     # Optional path to a custom .wav; falls back to a Windows system sound.
     sound_file: str | None = None
+    # If the phone's heartbeat is older than this, treat it as inactive and alert.
+    # The phone beats every ~30s, so 3 missed beats is a safe "it's gone" signal.
+    phone_inactive_after_seconds: int = 180
+    # Closing the PC client flips the shared off-switch (pauses the phone too).
+    # Set false if you'd rather quitting the PC leave the phone monitoring.
+    set_off_on_exit: bool = True
 
     @property
     def base(self) -> str:
@@ -77,6 +83,8 @@ def load_config() -> Config:
     popup_max_age_seconds = int(data.get("popup_max_age_seconds", 600))
     sound = bool(data.get("sound", True))
     sound_file = data.get("sound_file") or None
+    phone_inactive_after_seconds = int(data.get("phone_inactive_after_seconds", 180))
+    set_off_on_exit = bool(data.get("set_off_on_exit", True))
 
     missing = [
         name
@@ -104,4 +112,6 @@ def load_config() -> Config:
         popup_max_age_seconds=popup_max_age_seconds,
         sound=sound,
         sound_file=sound_file,
+        phone_inactive_after_seconds=phone_inactive_after_seconds,
+        set_off_on_exit=set_off_on_exit,
     )
