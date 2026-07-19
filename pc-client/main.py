@@ -247,7 +247,7 @@ class App:
                     if not self._inactive_alerted:
                         self._inactive_alerted = True
                         log.warning("Phone inactive: no heartbeat for %.0fs", age)
-                        self.popups.show_message(
+                        self.popups.show_alert(
                             "Phone inactive",
                             "RingKeeper hasn't heard from your phone. It may be off, "
                             "offline, or the app was stopped.",

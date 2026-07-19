@@ -33,6 +33,10 @@ AVATAR = 46
 MESSAGE_ACCENT = "#25d366"
 MESSAGE_DISMISS_MS = 12000
 
+# System alerts (e.g. "phone inactive") are not WhatsApp messages: they carry an
+# amber accent (matching the tray's inactive state) and stay put until dismissed.
+ALERT_ACCENT = "#e6a01e"
+
 
 class PopupManager:
     def __init__(self, root: tk.Tk, api: SupabaseRest):
@@ -125,9 +129,41 @@ class PopupManager:
 
     def show_message(self, sender: str, preview: str) -> None:
         """A transient WhatsApp-message card. Auto-dismisses; nothing is stored."""
-        accent = MESSAGE_ACCENT
-        name = sender or "WhatsApp"
+        self._show_card(
+            header="WhatsApp message",
+            name=sender or "WhatsApp",
+            preview=preview,
+            accent=MESSAGE_ACCENT,
+            auto_dismiss_ms=MESSAGE_DISMISS_MS,
+        )
 
+    def show_alert(self, title: str, detail: str) -> None:
+        """A system alert (e.g. 'phone inactive') — amber, persistent, not a
+        WhatsApp message. Stays on screen until the user dismisses it."""
+        self._show_card(
+            header="RingKeeper alert",
+            name=title,
+            preview=detail,
+            accent=ALERT_ACCENT,
+            auto_dismiss_ms=None,
+            avatar_text="!",
+        )
+
+    def _show_card(
+        self,
+        header: str,
+        name: str,
+        preview: str,
+        accent: str,
+        auto_dismiss_ms: int | None,
+        avatar_text: str | None = None,
+    ) -> None:
+        """Shared transient card used for WhatsApp messages and system alerts.
+
+        Not tied to a stored call: closing just dismisses it (no mark-seen). When
+        ``auto_dismiss_ms`` is set the card fades itself after that delay;
+        alerts pass None to stay until dismissed by hand.
+        """
         win = tk.Toplevel(self.root)
         win.overrideredirect(True)
         win.attributes("-topmost", True)
@@ -141,14 +177,14 @@ class PopupManager:
         content = tk.Frame(body, bg=theme.BG_CARD)
         content.pack(side="left", fill="both", expand=True, padx=(12, 12), pady=10)
 
-        header = tk.Frame(content, bg=theme.BG_CARD)
-        header.pack(fill="x")
+        header_row = tk.Frame(content, bg=theme.BG_CARD)
+        header_row.pack(fill="x")
         tk.Label(
-            header, text="● WhatsApp message", bg=theme.BG_CARD, fg=accent,
+            header_row, text=f"● {header}", bg=theme.BG_CARD, fg=accent,
             font=(theme.FONT_SEMI, 9),
         ).pack(side="left")
         close = tk.Label(
-            header, text="✕", bg=theme.BG_CARD, fg=theme.FG_DIM,
+            header_row, text="✕", bg=theme.BG_CARD, fg=theme.FG_DIM,
             font=(theme.FONT, 10), cursor="hand2",
         )
         close.pack(side="right")
@@ -164,7 +200,7 @@ class PopupManager:
         av.pack(side="left")
         av.create_oval(2, 2, AVATAR - 2, AVATAR - 2, fill=accent, outline="")
         av.create_text(
-            AVATAR / 2, AVATAR / 2, text=theme.initial_of(name),
+            AVATAR / 2, AVATAR / 2, text=avatar_text or theme.initial_of(name),
             fill="#ffffff", font=(theme.FONT_SEMI, 16),
         )
         text_col = tk.Frame(row, bg=theme.BG_CARD)
@@ -181,7 +217,8 @@ class PopupManager:
         self._open.append(win)
         self._enforce_cap()
         self._reflow()
-        win.after(MESSAGE_DISMISS_MS, lambda: self._close_message(win))
+        if auto_dismiss_ms is not None:
+            win.after(auto_dismiss_ms, lambda: self._close_message(win))
 
     def _close_message(self, win: tk.Toplevel) -> None:
         if win in self._open:
