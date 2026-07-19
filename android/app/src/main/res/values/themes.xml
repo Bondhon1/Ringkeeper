@@ -1,13 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.RingKeeper" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/rk_primary</item>
-        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimary">@color/rk_brand</item>
+        <item name="colorOnPrimary">@color/rk_on_brand</item>
+        <item name="colorPrimaryContainer">@color/rk_brand_container</item>
+        <item name="colorOnPrimaryContainer">@color/rk_on_brand_container</item>
+
+        <item name="colorSecondary">@color/rk_brand</item>
+        <item name="colorOnSecondary">@color/rk_on_brand</item>
+        <item name="colorSecondaryContainer">@color/rk_brand_container</item>
+        <item name="colorOnSecondaryContainer">@color/rk_on_brand_container</item>
+
+        <item name="android:colorBackground">@color/rk_bg</item>
+        <item name="colorSurface">@color/rk_surface</item>
+        <item name="colorOnSurface">@color/rk_text_primary</item>
+        <item name="colorSurfaceVariant">@color/rk_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/rk_text_secondary</item>
+        <item name="colorSurfaceContainer">@color/rk_surface_container</item>
+        <item name="colorSurfaceContainerLow">@color/rk_surface</item>
+        <item name="colorSurfaceContainerHigh">@color/rk_surface_variant</item>
+        <item name="colorOutline">@color/rk_outline</item>
+        <item name="colorOutlineVariant">@color/rk_outline</item>
+
+        <item name="colorError">@color/rk_danger</item>
+
+        <item name="android:statusBarColor">@color/rk_bg</item>
+        <item name="android:navigationBarColor">@color/rk_bg</item>
+        <item name="android:windowLightStatusBar">@bool/rk_light_status_bar</item>
     </style>
 
-    <!-- Settings screen keeps an action bar for the up button. -->
-    <style name="Theme.RingKeeper.Settings" parent="Theme.Material3.DayNight">
-        <item name="colorPrimary">@color/rk_primary</item>
-        <item name="colorOnPrimary">#FFFFFF</item>
+    <!-- Settings uses the same look; the toolbar is provided in-layout. -->
+    <style name="Theme.RingKeeper.Settings" parent="Theme.RingKeeper" />
+
+    <!-- Section label above a group of controls. -->
+    <style name="RK.Label" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:textColor">@color/rk_text_muted</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:letterSpacing">0.06</item>
     </style>
 </resources>

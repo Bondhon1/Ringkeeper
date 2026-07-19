@@ -7,17 +7,46 @@ from datetime import datetime, timezone
 FONT = "Segoe UI"
 FONT_SEMI = "Segoe UI Semibold"
 
+# --- DPI scaling --------------------------------------------------------------
+# Once the process is DPI-aware (see main._enable_dpi_awareness), Tk draws in
+# physical pixels and scales point-based fonts to the display DPI automatically —
+# but hard-coded pixel sizes (card widths, avatars, paddings) do NOT scale on
+# their own. px() multiplies a logical (96-DPI) pixel value by the display's
+# scale factor so those dimensions track the fonts and keep their proportions.
+_UI_SCALE = 1.0
+
+
+def set_ui_scale(root) -> None:
+    """Capture the display's scale factor from a live Tk root (1.0 at 96 DPI,
+    1.5 at 150%, …). Call once after the root exists and DPI awareness is set."""
+    global _UI_SCALE
+    try:
+        _UI_SCALE = max(1.0, root.winfo_fpixels("1i") / 96.0)
+    except Exception:  # noqa: BLE001
+        _UI_SCALE = 1.0
+
+
+def px(value: float) -> int:
+    """Scale a logical pixel measurement to the current display."""
+    return int(round(value * _UI_SCALE))
+
 # Surfaces (dark) --------------------------------------------------------------
-BG_BORDER = "#0c0f16"   # near-black outer edge
-BG_CARD = "#1b2130"     # popup / window body
-BG_CARD_ALT = "#212838"  # zebra-striped row
-BG_ELEV = "#2a3345"     # buttons / inputs
-BG_HOVER = "#39445c"    # hover state
+BG_BASE = "#0e1320"     # app background behind cards
+BG_BORDER = "#0a0d15"   # near-black outer edge (popup hairline)
+BG_CARD = "#171e2e"     # popup / window body
+BG_CARD_ALT = "#1c2434"  # zebra-striped row
+BG_ELEV = "#232c40"     # buttons / inputs
+BG_HOVER = "#2f3a52"    # hover state
+STROKE = "#2a3446"      # hairline separators / card outlines
+
+# Brand ------------------------------------------------------------------------
+BRAND = "#6b8afd"       # accent / primary actions
+BRAND_DIM = "#38507f"   # muted brand (pressed/hover)
 
 # Text -------------------------------------------------------------------------
-FG = "#f2f5fa"
-FG_SUBTLE = "#93a0b4"
-FG_DIM = "#6b7688"
+FG = "#eef1f7"
+FG_SUBTLE = "#aeb7c7"
+FG_DIM = "#7e8798"
 
 # Per-call-type accent colors --------------------------------------------------
 TYPE_COLORS: dict[str, str] = {

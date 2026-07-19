@@ -1,8 +1,9 @@
-"""The full call-list window — a dark, sortable table of every call.
+"""The full call-list window — a modern, dark, card-style list of every call.
 
-Newest first, filterable by call type. Unseen calls are emphasized; rows are
-zebra-striped. Network fetches run off the Tk thread and results are marshalled
-back with root.after.
+Newest first, filterable by a row of pill buttons. Each call is rendered as a
+row card (colored avatar, name, type badge, relative time, unseen dot) rather
+than a spreadsheet-style table. Network fetches run off the Tk thread and
+results are marshalled back with root.after.
 """
 
 from __future__ import annotations
@@ -10,15 +11,24 @@ from __future__ import annotations
 import logging
 import threading
 import tkinter as tk
-from tkinter import ttk
-from typing import Any
+from typing import Any, Callable
 
 from . import theme
 from .api import SupabaseRest, CALL_TYPE_LABELS
 
 log = logging.getLogger("ringkeeper.list")
 
-FILTER_ALL = "All"
+# Filter pills: label -> predicate over a call_type (None = everything).
+FILTERS: list[tuple[str, Callable[[str], bool]]] = [
+    ("All", lambda _t: True),
+    ("Missed", lambda t: t in ("missed", "whatsapp_missed")),
+    ("Incoming", lambda t: t in ("incoming", "whatsapp_incoming")),
+    ("Outgoing", lambda t: t == "outgoing"),
+    ("WhatsApp", lambda t: t.startswith("whatsapp_")),
+    ("Other", lambda t: t in ("rejected", "blocked", "voicemail", "unknown")),
+]
+
+MAX_ROWS = 300  # keep rendering snappy on large histories
 
 
 class ListWindow:
@@ -26,45 +36,15 @@ class ListWindow:
         self.root = root
         self.api = api
         self.win: tk.Toplevel | None = None
-        self.tree: ttk.Treeview | None = None
-        self.filter_var: tk.StringVar | None = None
+        self.canvas: tk.Canvas | None = None
+        self.inner: tk.Frame | None = None
         self.status_var: tk.StringVar | None = None
+        self.filter: str = "All"
+        self._pills: dict[str, tk.Label] = {}
+        self._calls: list[dict[str, Any]] = []
+        self._rows: dict[int, tk.Frame] = {}
 
-    # --- styling ---------------------------------------------------------
-    def _apply_style(self) -> None:
-        style = ttk.Style(self.win)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-        style.configure(
-            "RK.Treeview", background=theme.BG_CARD, fieldbackground=theme.BG_CARD,
-            foreground=theme.FG, rowheight=32, borderwidth=0, font=(theme.FONT, 10),
-        )
-        style.configure(
-            "RK.Treeview.Heading", background=theme.BG_ELEV, foreground=theme.FG_SUBTLE,
-            relief="flat", font=(theme.FONT_SEMI, 10), padding=(8, 6),
-        )
-        style.map(
-            "RK.Treeview",
-            background=[("selected", theme.BG_HOVER)],
-            foreground=[("selected", theme.FG)],
-        )
-        style.map("RK.Treeview.Heading", background=[("active", theme.BG_HOVER)])
-        style.configure(
-            "RK.TButton", background=theme.BG_ELEV, foreground=theme.FG,
-            borderwidth=0, padding=(12, 6), font=(theme.FONT, 10),
-        )
-        style.map(
-            "RK.TButton",
-            background=[("active", theme.BG_HOVER), ("pressed", theme.BG_HOVER)],
-        )
-        style.configure(
-            "RK.TCombobox", fieldbackground=theme.BG_ELEV, background=theme.BG_ELEV,
-            foreground=theme.FG, arrowcolor=theme.FG_SUBTLE, borderwidth=0,
-            padding=4,
-        )
-
+    # --- window ----------------------------------------------------------
     def open(self) -> None:
         if self.win is not None and self.win.winfo_exists():
             self.win.deiconify()
@@ -74,164 +54,263 @@ class ListWindow:
 
         self.win = tk.Toplevel(self.root)
         self.win.title("RingKeeper — Calls")
-        self.win.geometry("720x500")
-        self.win.minsize(560, 340)
-        self.win.configure(bg=theme.BG_CARD)
+        self.win.geometry(f"{theme.px(760)}x{theme.px(560)}")
+        self.win.minsize(theme.px(560), theme.px(380))
+        self.win.configure(bg=theme.BG_BASE)
         self.win.protocol("WM_DELETE_WINDOW", self._hide)
-        self._apply_style()
 
         # Header ----------------------------------------------------------
-        header = tk.Frame(self.win, bg=theme.BG_CARD)
-        header.pack(fill="x", padx=16, pady=(14, 4))
+        header = tk.Frame(self.win, bg=theme.BG_BASE)
+        header.pack(fill="x", padx=22, pady=(20, 6))
         tk.Label(
-            header, text="Call history", bg=theme.BG_CARD, fg=theme.FG,
-            font=(theme.FONT_SEMI, 15),
+            header, text="Call history", bg=theme.BG_BASE, fg=theme.FG,
+            font=(theme.FONT_SEMI, 17),
         ).pack(side="left")
-
-        # Toolbar ---------------------------------------------------------
-        toolbar = tk.Frame(self.win, bg=theme.BG_CARD)
-        toolbar.pack(fill="x", padx=16, pady=(6, 10))
-
-        tk.Label(
-            toolbar, text="Show", bg=theme.BG_CARD, fg=theme.FG_SUBTLE,
-            font=(theme.FONT, 10),
-        ).pack(side="left", padx=(0, 6))
-        self.filter_var = tk.StringVar(value=FILTER_ALL)
-        choices = [FILTER_ALL] + list(CALL_TYPE_LABELS.values())
-        combo = ttk.Combobox(
-            toolbar, textvariable=self.filter_var, values=choices,
-            state="readonly", width=12, style="RK.TCombobox",
+        refresh = tk.Label(
+            header, text="⟳  Refresh", bg=theme.BG_ELEV, fg=theme.FG_SUBTLE,
+            font=(theme.FONT_SEMI, 9), padx=12, pady=6, cursor="hand2",
         )
-        combo.pack(side="left", padx=(0, 12))
-        combo.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
+        refresh.pack(side="right")
+        refresh.bind("<Button-1>", lambda _e: self.refresh())
+        _hoverable(refresh, theme.BG_ELEV, theme.BG_HOVER)
 
-        ttk.Button(
-            toolbar, text="Refresh", command=self.refresh, style="RK.TButton",
-        ).pack(side="left")
-        ttk.Button(
-            toolbar, text="Mark selected seen", command=self._mark_selected,
-            style="RK.TButton",
-        ).pack(side="left", padx=8)
+        # Filter pills ----------------------------------------------------
+        pills = tk.Frame(self.win, bg=theme.BG_BASE)
+        pills.pack(fill="x", padx=22, pady=(4, 12))
+        for label, _pred in FILTERS:
+            pill = tk.Label(
+                pills, text=label, font=(theme.FONT_SEMI, 9), padx=13, pady=6,
+                cursor="hand2",
+            )
+            pill.pack(side="left", padx=(0, 8))
+            pill.bind("<Button-1>", lambda _e, l=label: self._select_filter(l))
+            self._pills[label] = pill
 
-        # Table -----------------------------------------------------------
-        table = tk.Frame(self.win, bg=theme.BG_CARD)
-        table.pack(fill="both", expand=True, padx=16, pady=(0, 8))
+        # Scrollable list -------------------------------------------------
+        body = tk.Frame(self.win, bg=theme.BG_CARD, highlightthickness=1,
+                        highlightbackground=theme.STROKE)
+        body.pack(fill="both", expand=True, padx=22, pady=(0, 8))
 
-        cols = ("time", "type", "name", "number", "seen")
-        self.tree = ttk.Treeview(
-            table, columns=cols, show="headings", style="RK.Treeview",
-        )
-        for col, text, width, anchor in (
-            ("time", "When", 150, "w"),
-            ("type", "Type", 90, "w"),
-            ("name", "Caller", 170, "w"),
-            ("number", "Number", 150, "w"),
-            ("seen", "Seen", 60, "center"),
-        ):
-            self.tree.heading(col, text=text)
-            self.tree.column(col, width=width, anchor=anchor)
-        self.tree.pack(side="left", fill="both", expand=True)
-
-        scroll = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scroll.set)
+        self.canvas = tk.Canvas(body, bg=theme.BG_CARD, highlightthickness=0, bd=0)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        scroll = tk.Scrollbar(body, orient="vertical", command=self.canvas.yview)
         scroll.pack(side="right", fill="y")
+        self.canvas.configure(yscrollcommand=scroll.set)
 
-        self.tree.tag_configure("odd", background=theme.BG_CARD)
-        self.tree.tag_configure("even", background=theme.BG_CARD_ALT)
-        self.tree.tag_configure("unseen", font=(theme.FONT_SEMI, 10), foreground=theme.FG)
-        self.tree.bind("<Double-1>", self._on_double_click)
+        self.inner = tk.Frame(self.canvas, bg=theme.BG_CARD)
+        self._win_id = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.inner.bind(
+            "<Configure>",
+            lambda _e: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
+        )
+        self.canvas.bind(
+            "<Configure>",
+            lambda e: self.canvas.itemconfigure(self._win_id, width=e.width),
+        )
+        self._bind_wheel(self.canvas)
 
         # Status bar ------------------------------------------------------
         self.status_var = tk.StringVar(value="Loading…")
         tk.Label(
-            self.win, textvariable=self.status_var, anchor="w", bg=theme.BG_CARD,
+            self.win, textvariable=self.status_var, anchor="w", bg=theme.BG_BASE,
             fg=theme.FG_DIM, font=(theme.FONT, 9),
-        ).pack(fill="x", padx=16, pady=(0, 10))
+        ).pack(fill="x", padx=22, pady=(0, 12))
 
+        self._style_pills()
         self.refresh()
 
     def _hide(self) -> None:
         if self.win is not None:
             self.win.withdraw()
 
+    # --- filter pills ----------------------------------------------------
+    def _select_filter(self, label: str) -> None:
+        self.filter = label
+        self._style_pills()
+        self._populate()
+
+    def _style_pills(self) -> None:
+        for label, pill in self._pills.items():
+            if label == self.filter:
+                pill.configure(bg=theme.BRAND, fg="#ffffff")
+                _hoverable(pill, theme.BRAND, theme.BRAND)
+            else:
+                pill.configure(bg=theme.BG_ELEV, fg=theme.FG_SUBTLE)
+                _hoverable(pill, theme.BG_ELEV, theme.BG_HOVER)
+
     # --- data ------------------------------------------------------------
     def refresh(self) -> None:
         if self.status_var is not None:
             self.status_var.set("Loading…")
-        label = self.filter_var.get() if self.filter_var else FILTER_ALL
-        call_type = None
-        if label != FILTER_ALL:
-            call_type = next((k for k, v in CALL_TYPE_LABELS.items() if v == label), None)
-        threading.Thread(target=self._fetch, args=(call_type,), daemon=True).start()
+        threading.Thread(target=self._fetch, daemon=True).start()
 
-    def _fetch(self, call_type: str | None) -> None:
+    def _fetch(self) -> None:
         try:
-            calls = self.api.list_calls(call_type=call_type, limit=1000)
-            self.root.after(0, lambda: self._populate(calls))
+            calls = self.api.list_calls(limit=1000)
+            self.root.after(0, lambda: self._on_fetched(calls))
         except Exception as exc:  # noqa: BLE001
             log.warning("List fetch failed: %s", exc)
             self.root.after(0, lambda: self._set_status(f"Error: {exc}"))
 
-    def _populate(self, calls: list[dict[str, Any]]) -> None:
-        if self.tree is None or not self.tree.winfo_exists():
+    def _on_fetched(self, calls: list[dict[str, Any]]) -> None:
+        self._calls = calls
+        self._populate()
+
+    def _predicate(self) -> Callable[[str], bool]:
+        for label, pred in FILTERS:
+            if label == self.filter:
+                return pred
+        return lambda _t: True
+
+    def _populate(self) -> None:
+        if self.inner is None or not self.inner.winfo_exists():
             return
-        self.tree.delete(*self.tree.get_children())
-        unseen = 0
-        for i, c in enumerate(calls):
-            seen = bool(c.get("seen"))
-            if not seen:
-                unseen += 1
-            tags = ["even" if i % 2 else "odd"]
-            if not seen:
-                tags.append("unseen")
-            self.tree.insert(
-                "", "end", iid=str(c["id"]), tags=tuple(tags),
-                values=(
-                    theme.relative_time(c.get("call_time", "")),
-                    CALL_TYPE_LABELS.get(c.get("call_type", "unknown"), "Unknown"),
-                    c.get("caller_name") or "—",
-                    c.get("number", ""),
-                    "" if seen else "●",
-                ),
-            )
-        total = len(calls)
+        for child in self.inner.winfo_children():
+            child.destroy()
+        self._rows.clear()
+
+        pred = self._predicate()
+        shown = [c for c in self._calls if pred(c.get("call_type", "unknown"))]
+        unseen = sum(1 for c in shown if not c.get("seen"))
+
+        if not shown:
+            tk.Label(
+                self.inner, text="No calls to show.", bg=theme.BG_CARD,
+                fg=theme.FG_DIM, font=(theme.FONT, 11), pady=40,
+            ).pack(fill="x")
+        else:
+            for i, call in enumerate(shown[:MAX_ROWS]):
+                self._render_row(call, first=(i == 0))
+
+        total = len(shown)
+        capped = "" if total <= MAX_ROWS else f"  ·  showing first {MAX_ROWS}"
         self._set_status(
             f"{total} call{'s' if total != 1 else ''}"
             + (f"  ·  {unseen} unseen" if unseen else "  ·  all seen")
+            + capped
         )
+        if self.canvas is not None:
+            self.canvas.yview_moveto(0.0)
+
+    def _render_row(self, call: dict[str, Any], first: bool) -> None:
+        assert self.inner is not None
+        call_type = call.get("call_type", "unknown")
+        accent = theme.type_color(call_type)
+        name = call.get("caller_name") or call.get("number") or "Unknown"
+        number = call.get("number", "")
+        type_label = CALL_TYPE_LABELS.get(call_type, "Call")
+        seen = bool(call.get("seen"))
+
+        if not first:
+            tk.Frame(self.inner, bg=theme.STROKE, height=1).pack(fill="x", padx=14)
+
+        row = tk.Frame(self.inner, bg=theme.BG_CARD)
+        row.pack(fill="x")
+        pad = tk.Frame(row, bg=theme.BG_CARD)
+        pad.pack(fill="x", padx=14, pady=9)
+
+        # Avatar
+        av_sz = theme.px(42)
+        av = tk.Canvas(pad, width=av_sz, height=av_sz, bg=theme.BG_CARD,
+                       highlightthickness=0)
+        av.pack(side="left")
+        av.create_oval(2, 2, av_sz - 2, av_sz - 2, fill=accent, outline="")
+        av.create_text(av_sz / 2, av_sz / 2, text=theme.initial_of(name),
+                       fill="#ffffff", font=(theme.FONT_SEMI, 15))
+
+        # Name + subtitle
+        textcol = tk.Frame(pad, bg=theme.BG_CARD)
+        textcol.pack(side="left", fill="x", expand=True, padx=(13, 8))
+        name_font = (theme.FONT_SEMI, 11) if seen else (theme.FONT_SEMI, 11)
+        tk.Label(textcol, text=name, bg=theme.BG_CARD, fg=theme.FG,
+                 font=name_font, anchor="w").pack(fill="x")
+        sub = number if (number and number != name) else type_label
+        tk.Label(textcol, text=sub, bg=theme.BG_CARD, fg=theme.FG_SUBTLE,
+                 font=(theme.FONT, 9), anchor="w").pack(fill="x")
+
+        # Right: type badge + time + unseen dot
+        rightcol = tk.Frame(pad, bg=theme.BG_CARD)
+        rightcol.pack(side="right")
+        badge_row = tk.Frame(rightcol, bg=theme.BG_CARD)
+        badge_row.pack(anchor="e")
+        if not seen:
+            tk.Label(badge_row, text="●", bg=theme.BG_CARD, fg=theme.BRAND,
+                     font=(theme.FONT, 9)).pack(side="right", padx=(6, 0))
+        tk.Label(badge_row, text=type_label, bg=theme.BG_CARD, fg=accent,
+                 font=(theme.FONT_SEMI, 9)).pack(side="right")
+        tk.Label(rightcol, text=theme.relative_time(call.get("call_time", "")),
+                 bg=theme.BG_CARD, fg=theme.FG_DIM, font=(theme.FONT, 9),
+                 anchor="e").pack(anchor="e", pady=(2, 0))
+
+        # Interactions: hover highlight (recolors the whole row) + click to seen.
+        def recolor(color: str) -> None:
+            for w in _descendants(row):
+                try:
+                    w.configure(bg=color)
+                except tk.TclError:
+                    pass
+
+        cid = call.get("id")
+        for w in _descendants(row):
+            w.bind("<Enter>", lambda _e: recolor(theme.BG_HOVER))
+            w.bind("<Leave>", lambda _e: recolor(theme.BG_CARD))
+            if isinstance(cid, int) and not seen:
+                w.configure(cursor="hand2")
+                w.bind("<Button-1>", lambda _e, c=cid: self._mark_seen(c))
+            self._bind_wheel(w)
+
+        if isinstance(cid, int):
+            self._rows[cid] = row
+
+    # --- interactions ----------------------------------------------------
+    def _mark_seen(self, call_id: int) -> None:
+        # Optimistic local update, then push.
+        for call in self._calls:
+            if call.get("id") == call_id:
+                call["seen"] = True
+                break
+        self._populate()
+
+        def worker() -> None:
+            try:
+                self.api.mark_seen(call_id)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("mark_seen(%s) failed: %s", call_id, exc)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def apply_seen(self, call_id: int) -> None:
+        """Update the list when another client marked a call seen."""
+        changed = False
+        for call in self._calls:
+            if call.get("id") == call_id and not call.get("seen"):
+                call["seen"] = True
+                changed = True
+                break
+        if changed and self.win is not None and self.win.winfo_exists():
+            self._populate()
 
     def _set_status(self, text: str) -> None:
         if self.status_var is not None:
             self.status_var.set(text)
 
-    def _on_double_click(self, _event: object) -> None:
-        self._mark_selected()
+    # --- scrolling -------------------------------------------------------
+    def _bind_wheel(self, widget: tk.Widget) -> None:
+        widget.bind("<MouseWheel>", self._on_wheel)
 
-    def _mark_selected(self) -> None:
-        if self.tree is None:
-            return
-        ids = [int(iid) for iid in self.tree.selection() if iid.isdigit()]
-        if not ids:
-            return
+    def _on_wheel(self, event: tk.Event) -> None:
+        if self.canvas is not None:
+            self.canvas.yview_scroll(int(-event.delta / 120), "units")
 
-        def worker() -> None:
-            for cid in ids:
-                try:
-                    self.api.mark_seen(cid)
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("mark_seen(%s) failed: %s", cid, exc)
-            self.root.after(0, self.refresh)
 
-        threading.Thread(target=worker, daemon=True).start()
+def _hoverable(widget: tk.Label, base: str, hover: str) -> None:
+    widget.bind("<Enter>", lambda _e: widget.configure(bg=hover), add="+")
+    widget.bind("<Leave>", lambda _e: widget.configure(bg=base), add="+")
 
-    def apply_seen(self, call_id: int) -> None:
-        """Update a row when another client marked a call seen."""
-        if self.tree is None or not self.tree.winfo_exists():
-            return
-        iid = str(call_id)
-        if self.tree.exists(iid):
-            vals = list(self.tree.item(iid, "values"))
-            if len(vals) == 5:
-                vals[4] = ""
-                tags = tuple(t for t in self.tree.item(iid, "tags") if t != "unseen")
-                self.tree.item(iid, values=vals, tags=tags)
+
+def _descendants(widget: tk.Widget) -> list[tk.Widget]:
+    """A widget plus every widget nested under it (depth-first)."""
+    out = [widget]
+    for child in widget.winfo_children():
+        out.extend(_descendants(child))
+    return out

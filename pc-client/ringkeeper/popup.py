@@ -22,7 +22,7 @@ from .api import SupabaseRest, CALL_TYPE_LABELS
 log = logging.getLogger("ringkeeper.popup")
 
 POPUP_W = 360
-POPUP_H = 116
+POPUP_H_MIN = 108  # floor only — each card sizes to its own content (see _reflow)
 GAP = 10
 SCREEN_MARGIN = 18
 TASKBAR_ALLOWANCE = 52
@@ -57,14 +57,16 @@ class PopupManager:
         win.configure(bg=theme.BG_BORDER)
         win.resizable(False, False)
 
+        av_sz = theme.px(AVATAR)
         body = tk.Frame(win, bg=theme.BG_CARD)
-        body.pack(fill="both", expand=True, padx=1, pady=1)
+        body.pack(fill="both", expand=True, padx=theme.px(1), pady=theme.px(1))
 
         # Colored accent strip down the left edge.
-        tk.Frame(body, bg=accent, width=4).pack(side="left", fill="y")
+        tk.Frame(body, bg=accent, width=theme.px(4)).pack(side="left", fill="y")
 
         content = tk.Frame(body, bg=theme.BG_CARD)
-        content.pack(side="left", fill="both", expand=True, padx=(12, 12), pady=10)
+        content.pack(side="left", fill="both", expand=True,
+                     padx=(theme.px(12), theme.px(12)), pady=theme.px(10))
 
         # Header: "● Missed call" + time + close.
         header = tk.Frame(content, bg=theme.BG_CARD)
@@ -84,25 +86,25 @@ class PopupManager:
         tk.Label(
             header, text=theme.relative_time(call.get("call_time", "")),
             bg=theme.BG_CARD, fg=theme.FG_SUBTLE, font=(theme.FONT, 9),
-        ).pack(side="right", padx=(0, 10))
+        ).pack(side="right", padx=(0, theme.px(10)))
 
         # Row: avatar + name/number.
         row = tk.Frame(content, bg=theme.BG_CARD)
-        row.pack(fill="x", pady=(8, 0))
+        row.pack(fill="x", pady=(theme.px(8), 0))
 
         av = tk.Canvas(
-            row, width=AVATAR, height=AVATAR, bg=theme.BG_CARD,
+            row, width=av_sz, height=av_sz, bg=theme.BG_CARD,
             highlightthickness=0,
         )
         av.pack(side="left")
-        av.create_oval(2, 2, AVATAR - 2, AVATAR - 2, fill=accent, outline="")
+        av.create_oval(2, 2, av_sz - 2, av_sz - 2, fill=accent, outline="")
         av.create_text(
-            AVATAR / 2, AVATAR / 2, text=theme.initial_of(name),
+            av_sz / 2, av_sz / 2, text=theme.initial_of(name),
             fill="#ffffff", font=(theme.FONT_SEMI, 16),
         )
 
         text = tk.Frame(row, bg=theme.BG_CARD)
-        text.pack(side="left", fill="x", expand=True, padx=(12, 0))
+        text.pack(side="left", fill="x", expand=True, padx=(theme.px(12), 0))
         tk.Label(
             text, text=name, bg=theme.BG_CARD, fg=theme.FG,
             font=(theme.FONT_SEMI, 13), anchor="w", justify="left",
@@ -116,7 +118,7 @@ class PopupManager:
         dismiss = tk.Button(
             row, text="Dismiss", relief="flat", bg=theme.BG_ELEV, fg=theme.FG,
             activebackground=theme.BG_HOVER, activeforeground=theme.FG, bd=0,
-            font=(theme.FONT, 9), cursor="hand2", padx=14, pady=6,
+            font=(theme.FONT, 9), cursor="hand2", padx=theme.px(14), pady=theme.px(6),
             command=lambda: self._close(win, call),
         )
         dismiss.pack(side="right", anchor="s")
@@ -170,12 +172,14 @@ class PopupManager:
         win.configure(bg=theme.BG_BORDER)
         win.resizable(False, False)
 
+        av_sz = theme.px(AVATAR)
         body = tk.Frame(win, bg=theme.BG_CARD)
-        body.pack(fill="both", expand=True, padx=1, pady=1)
-        tk.Frame(body, bg=accent, width=4).pack(side="left", fill="y")
+        body.pack(fill="both", expand=True, padx=theme.px(1), pady=theme.px(1))
+        tk.Frame(body, bg=accent, width=theme.px(4)).pack(side="left", fill="y")
 
         content = tk.Frame(body, bg=theme.BG_CARD)
-        content.pack(side="left", fill="both", expand=True, padx=(12, 12), pady=10)
+        content.pack(side="left", fill="both", expand=True,
+                     padx=(theme.px(12), theme.px(12)), pady=theme.px(10))
 
         header_row = tk.Frame(content, bg=theme.BG_CARD)
         header_row.pack(fill="x")
@@ -193,25 +197,26 @@ class PopupManager:
         close.bind("<Leave>", lambda _e: close.configure(fg=theme.FG_DIM))
 
         row = tk.Frame(content, bg=theme.BG_CARD)
-        row.pack(fill="x", pady=(8, 0))
+        row.pack(fill="x", pady=(theme.px(8), 0))
         av = tk.Canvas(
-            row, width=AVATAR, height=AVATAR, bg=theme.BG_CARD, highlightthickness=0,
+            row, width=av_sz, height=av_sz, bg=theme.BG_CARD, highlightthickness=0,
         )
         av.pack(side="left")
-        av.create_oval(2, 2, AVATAR - 2, AVATAR - 2, fill=accent, outline="")
+        av.create_oval(2, 2, av_sz - 2, av_sz - 2, fill=accent, outline="")
         av.create_text(
-            AVATAR / 2, AVATAR / 2, text=avatar_text or theme.initial_of(name),
+            av_sz / 2, av_sz / 2, text=avatar_text or theme.initial_of(name),
             fill="#ffffff", font=(theme.FONT_SEMI, 16),
         )
         text_col = tk.Frame(row, bg=theme.BG_CARD)
-        text_col.pack(side="left", fill="x", expand=True, padx=(12, 0))
+        text_col.pack(side="left", fill="x", expand=True, padx=(theme.px(12), 0))
         tk.Label(
             text_col, text=name, bg=theme.BG_CARD, fg=theme.FG,
             font=(theme.FONT_SEMI, 13), anchor="w", justify="left",
         ).pack(fill="x")
         tk.Label(
             text_col, text=preview, bg=theme.BG_CARD, fg=theme.FG_SUBTLE,
-            font=(theme.FONT, 10), anchor="w", justify="left", wraplength=POPUP_W - 100,
+            font=(theme.FONT, 10), anchor="w", justify="left",
+            wraplength=theme.px(POPUP_W - 100),
         ).pack(fill="x")
 
         self._open.append(win)
@@ -259,15 +264,25 @@ class PopupManager:
             log.warning("Failed to mark call %s seen: %s", call_id, exc)
 
     def _reflow(self) -> None:
-        """Re-stack open popups from the bottom-right corner upward."""
+        """Re-stack open popups from the bottom-right corner upward.
+
+        Each card is sized to its own requested height, so a taller card (e.g.
+        the multi-line 'phone inactive' alert) is shown in full instead of being
+        clipped to a fixed height.
+        """
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        x = sw - POPUP_W - SCREEN_MARGIN
-        for i, win in enumerate(reversed(self._open)):
-            y = sh - TASKBAR_ALLOWANCE - (i + 1) * POPUP_H - i * GAP
+        w = theme.px(POPUP_W)
+        x = sw - w - theme.px(SCREEN_MARGIN)
+        y_bottom = sh - theme.px(TASKBAR_ALLOWANCE)
+        for win in reversed(self._open):  # newest first, nearest the taskbar
             try:
-                win.geometry(f"{POPUP_W}x{POPUP_H}+{x}+{y}")
+                win.update_idletasks()  # ensure reqheight reflects the content
+                h = max(win.winfo_reqheight(), theme.px(POPUP_H_MIN))
+                y = y_bottom - h
+                win.geometry(f"{w}x{h}+{x}+{y}")
                 win.lift()
                 win.attributes("-topmost", True)
+                y_bottom = y - theme.px(GAP)
             except tk.TclError:
                 pass

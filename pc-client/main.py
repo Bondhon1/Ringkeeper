@@ -44,6 +44,33 @@ def _parse_iso(value: Any) -> "datetime | None":
         return None
 
 
+def _enable_dpi_awareness() -> None:
+    """Tell Windows this process draws at native resolution, so Tk renders
+    crisply. Without this, Windows bitmap-stretches the window on high-DPI /
+    scaled displays and everything (text, popups) looks blurry. Must run before
+    the first Tk window is created. No-op off Windows or if the call fails.
+    """
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    # Try the best option first, falling back to older APIs.
+    try:  # Per-Monitor v2 — sharp on each monitor at its own scale factor.
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+        return
+    except Exception:  # noqa: BLE001
+        pass
+    try:  # System-DPI aware (Windows 8.1+).
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:  # noqa: BLE001
+        pass
+    try:  # Legacy system-DPI aware (Windows 7+).
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def setup_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -79,6 +106,10 @@ class App:
 
         self.root = tk.Tk()
         self.root.withdraw()
+        # Capture the display scale so pixel-based UI sizes track the DPI.
+        from ringkeeper import theme
+
+        theme.set_ui_scale(self.root)
 
         self.popups = PopupManager(self.root, self.api)
         self.list_window = ListWindow(self.root, self.api)
@@ -289,6 +320,7 @@ class App:
 
 
 def main() -> None:
+    _enable_dpi_awareness()
     setup_logging()
     try:
         app = App()

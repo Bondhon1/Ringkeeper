@@ -1,5 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="rk_primary">#2E6BE5</color>
-    <color name="ic_launcher_background">#2E6BE5</color>
+    <!-- Brand -->
+    <color name="rk_brand">#4C6EF5</color>
+    <color name="rk_on_brand">#FFFFFF</color>
+    <color name="rk_brand_container">#DEE4FF</color>
+    <color name="rk_on_brand_container">#0A1E52</color>
+
+    <!-- Semantic state colors -->
+    <color name="rk_success">#067647</color>
+    <color name="rk_success_container">#DCFAE6</color>
+    <color name="rk_warning">#B54708</color>
+    <color name="rk_warning_container">#FEF0C7</color>
+    <color name="rk_danger">#B42318</color>
+    <color name="rk_danger_container">#FEE4E2</color>
+
+    <!-- Surfaces -->
+    <color name="rk_bg">#F4F6FB</color>
+    <color name="rk_surface">#FFFFFF</color>
+    <color name="rk_surface_container">#FFFFFF</color>
+    <color name="rk_surface_variant">#EEF1F7</color>
+    <color name="rk_outline">#E1E5EE</color>
+
+    <!-- Text -->
+    <color name="rk_text_primary">#101828</color>
+    <color name="rk_text_secondary">#475467</color>
+    <color name="rk_text_muted">#667085</color>
+
+    <color name="ic_launcher_background">#4C6EF5</color>
 </resources>

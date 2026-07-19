@@ -8,10 +8,14 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
+import android.widget.ImageView
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.lifecycleScope
+import com.ringkeeper.app.R
 import com.ringkeeper.app.data.CallRepository
 import com.ringkeeper.app.data.Settings
 import com.ringkeeper.app.databinding.ActivityMainBinding
@@ -38,12 +42,12 @@ class MainActivity : AppCompatActivity() {
         settings = Settings.get(this)
         repo = CallRepository(this)
 
-        binding.btnSettings.setOnClickListener {
+        binding.rowConn.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
-        binding.btnGrantPermissions.setOnClickListener { requestPermissions() }
-        binding.btnBattery.setOnClickListener { requestIgnoreBatteryOptimizations() }
-        binding.btnWhatsApp.setOnClickListener { openNotificationAccessSettings() }
+        binding.rowPerm.setOnClickListener { requestPermissions() }
+        binding.rowBattery.setOnClickListener { requestIgnoreBatteryOptimizations() }
+        binding.rowWhatsApp.setOnClickListener { openNotificationAccessSettings() }
         binding.btnStart.setOnClickListener { startMonitoring() }
         binding.btnToggle.setOnClickListener { toggleMonitoring() }
     }
@@ -67,6 +71,14 @@ class MainActivity : AppCompatActivity() {
     private fun startMonitoring() {
         if (!settings.isConfigured) {
             startActivity(Intent(this, SettingsActivity::class.java))
+            return
+        }
+        if (!settings.monitoringEnabled) {
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) { repo.setMonitoring(true, source = "phone") }
+                CallMonitorService.start(this@MainActivity)
+                refreshStatus()
+            }
             return
         }
         CallMonitorService.start(this)
@@ -117,25 +129,80 @@ class MainActivity : AppCompatActivity() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         val batteryOk = pm.isIgnoringBatteryOptimizations(packageName)
         val hasPerms = repo.hasCallLogPermission()
+        val configured = settings.isConfigured
+        val whatsAppOn = hasNotificationAccess()
+        val monitoringOn = settings.monitoringEnabled
 
-        binding.txtConfigured.text =
-            if (settings.isConfigured) "Supabase: ${settings.supabaseUrl}" else "Supabase: not configured"
-        binding.txtPermissions.text =
-            if (hasPerms) "Call log permission: granted" else "Call log permission: NOT granted"
-        binding.txtBattery.text =
-            if (batteryOk) "Battery optimization: disabled ✓" else "Battery optimization: ON (recommend disabling)"
-        binding.txtWhatsApp.text =
-            if (hasNotificationAccess()) "WhatsApp call capture: on ✓" else "WhatsApp call capture: off (optional)"
+        setStep(
+            binding.icoPerm, binding.txtPerm, hasPerms,
+            doneText = "Granted", todoText = "Tap to grant",
+        )
+        setStep(
+            binding.icoConn, binding.txtConn, configured,
+            doneText = settings.supabaseUrl, todoText = "Tap to configure",
+        )
+        setStep(
+            binding.icoBattery, binding.txtBattery, batteryOk,
+            doneText = "Disabled", todoText = "Recommended to disable",
+        )
+        setStep(
+            binding.icoWhatsApp, binding.txtWhatsApp, whatsAppOn,
+            doneText = "On", todoText = "Optional · off",
+        )
 
-        val enabled = settings.monitoringEnabled
+        // Hero: overall state.
+        val setupDone = hasPerms && configured
+        when {
+            !setupDone -> setHero(
+                "Setup needed", R.color.rk_warning,
+                "Finish the required steps below to start relaying calls.",
+            )
+            monitoringOn -> setHero(
+                "Active", R.color.rk_success,
+                "RingKeeper is watching and relaying calls to your PC.",
+            )
+            else -> setHero(
+                "Paused", R.color.rk_warning,
+                "Monitoring is turned off on both this phone and your PC.",
+            )
+        }
+
+        binding.btnStart.text = if (setupDone && monitoringOn) "Restart monitoring" else "Start monitoring"
         binding.btnToggle.text =
-            if (enabled) "Turn off (pause both devices)" else "Turn on (resume both devices)"
+            if (monitoringOn) "Turn off (pause both devices)" else "Turn on (resume both devices)"
 
         lifecycleScope.launch {
             val (total, pending) = withContext(Dispatchers.IO) {
                 repo.totalCount() to repo.unsyncedCount()
             }
-            binding.txtStats.text = "Calls stored locally: $total  •  Pending sync: $pending"
+            binding.txtStatStored.text = total.toString()
+            binding.txtStatPending.text = pending.toString()
+        }
+    }
+
+    private fun setHero(title: String, colorRes: Int, sub: String) {
+        val color = ContextCompat.getColor(this, colorRes)
+        binding.txtHeroStatus.text = title
+        binding.txtHeroSub.text = sub
+        binding.dotStatus.background?.mutate()?.setTint(color)
+    }
+
+    /** Flip one checklist row between the "done" (green check) and "todo" states. */
+    private fun setStep(
+        icon: ImageView,
+        status: TextView,
+        done: Boolean,
+        doneText: String,
+        todoText: String,
+    ) {
+        if (done) {
+            icon.setImageResource(R.drawable.ic_check_circle)
+            icon.setColorFilter(ContextCompat.getColor(this, R.color.rk_success))
+            status.text = doneText
+        } else {
+            icon.setImageResource(R.drawable.ic_circle_outline)
+            icon.setColorFilter(ContextCompat.getColor(this, R.color.rk_text_muted))
+            status.text = todoText
         }
     }
 }
